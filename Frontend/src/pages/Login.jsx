@@ -24,7 +24,7 @@ export default function Login() {
     setError("");
     setSubmitting(true);
     try {
-      await login({ email: form.email, password: form.password, role });
+      await login({ email: form.email, password: form.password, appRole: role });
       navigate(role === "hospital" ? "/dashboard/hospital" : "/dashboard/patient");
     } catch (err) {
       setError(err.message || "Invalid email or password.");

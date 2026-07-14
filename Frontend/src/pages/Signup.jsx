@@ -7,7 +7,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 const inputCls =
   "w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100";
 
-// Must match the `hospitalType` enum in Backend/models/Hospital.js
+// Must match the `hospitalType` enum in Backend/src/models/Hospital.js
 const HOSPITAL_TYPES = [
   { value: "government", label: "Government" },
   { value: "private", label: "Private" },
@@ -27,10 +27,10 @@ export default function Signup() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
-    // Patient (Backend/models/User.js)
+    // Patient (Backend/src/models/User.js)
     firstName: "",
     lastName: "",
-    // Hospital (Backend/models/Hospital.js)
+    // Hospital (Backend/src/models/Hospital.js)
     hospitalName: "",
     registrationNumber: "",
     hospitalType: "",
@@ -285,6 +285,8 @@ export default function Signup() {
               name="password"
               required
               minLength={8}
+              pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#+\-_]).{8,}"
+              title="At least 8 characters, with an uppercase letter, lowercase letter, number, and special character (@$!%*?&#+-_)"
               value={form.password}
               onChange={handleChange}
               placeholder="At least 8 characters"
@@ -299,6 +301,9 @@ export default function Signup() {
               {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
             </button>
           </div>
+          <p className="mt-1.5 text-xs text-slate-400">
+            Include an uppercase letter, lowercase letter, number, and special character (@$!%*?&#+-_).
+          </p>
         </div>
 
         <button
