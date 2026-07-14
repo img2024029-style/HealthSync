@@ -19,10 +19,8 @@ app.get("/", (req, res) => {
   res.json({ status: "ok", message: "HealthSync API is running" });
 });
 
-// Route mounting (add route files here as they are built)
-// app.use("/api/users", require("./routes/userRoutes"));
-// app.use("/api/admins", require("./routes/adminRoutes"));
-// app.use("/api/hospitals", require("./routes/hospitalRoutes"));
+// Route mounting
+app.use("/api/auth", require("./routes/authRoutes"));
 
 const PORT = process.env.PORT || 5000;
 

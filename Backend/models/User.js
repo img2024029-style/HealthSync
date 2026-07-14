@@ -45,11 +45,11 @@ const userSchema = new mongoose.Schema(
 );
 
 // Hash password before saving (pre-hook lets you run code before a specific Mongoose operation, such as saving a document, deleting one, or executing a query)
-userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next(); //If password is unchanged the hook exits immediately
+// Mongoose 9 no longer passes a `next` callback to pre-hooks; use an async function instead.
+userSchema.pre("save", async function () {
+  if (!this.isModified("password")) return; // If password is unchanged the hook exits immediately
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
-  next();
 });
 
 // This function compares the candidate's password with stored hash
