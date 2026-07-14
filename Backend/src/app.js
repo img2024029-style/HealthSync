@@ -24,7 +24,7 @@ const compression = require('compression');
 
 const applySecurity = require('./middleware/security');
 const { generalLimiter } = require('./middleware/rateLimiter');
-const setupLogger = require('./utils/logger');
+const { setupHttpLogger } = require('./utils/logger');
 const notFound = require('./middleware/notFound');
 const errorHandler = require('./middleware/errorHandler');
 const routes = require('./routes');
@@ -45,7 +45,7 @@ app.use(
 );
 
 // ─── 3. Request Logging (development only) ───────────────────
-setupLogger(app);
+setupHttpLogger(app);
 
 // ─── 4. Compression ─────────────────────────────────────────
 app.use(compression());

@@ -1,6 +1,12 @@
 /**
  * Auth service — core business logic for authentication.
  * Controllers delegate all logic here.
+ *
+ * Key improvements:
+ *   - Refresh tokens use SHA-256 → O(1) lookup (no bcrypt scan)
+ *   - Token family tracking with reuse detection
+ *   - If a used token is replayed → entire family revoked (theft protection)
+ *   - Structured logging via logger utility
  */
 const User = require('../models/User');
 const tokenService = require('./token.service');
@@ -9,6 +15,7 @@ const auditService = require('./audit.service');
 const generateRandomToken = require('../utils/generateRandomToken');
 const hashToken = require('../utils/hashToken');
 const ApiError = require('../utils/ApiError');
+const logger = require('../utils/logger');
 const MESSAGES = require('../constants/messages');
 const { verificationTokenExpiryMs, resetTokenExpiryMs } = require('../config/jwt.config');
 
@@ -46,7 +53,7 @@ const register = async (userData, ip, userAgent) => {
 
   // Send verification email (fire-and-forget)
   emailService.sendVerificationEmail(email, verificationRawToken).catch((err) => {
-    console.error('Failed to send verification email:', err.message);
+    logger.error('Failed to send verification email', { email, error: err.message });
   });
 
   // Audit log
@@ -57,6 +64,8 @@ const register = async (userData, ip, userAgent) => {
     userAgent,
     success: true,
   });
+
+  logger.info('User registered', { userId: user._id, email });
 
   return {
     user: user.toJSON(),
@@ -91,6 +100,8 @@ const verifyEmail = async (rawToken) => {
     success: true,
   });
 
+  logger.info('Email verified', { userId: user._id });
+
   return { message: MESSAGES.EMAIL_VERIFIED };
 };
 
@@ -107,7 +118,6 @@ const login = async (email, password, ip, userAgent) => {
 
   // Check if account is locked
   if (user.isLocked()) {
-    // Audit log
     auditService.logAuthEvent({
       userId: user._id,
       action: 'LOGIN_FAILED',
@@ -136,9 +146,9 @@ const login = async (email, password, ip, userAgent) => {
         success: false,
         metadata: { loginAttempts: updatedUser.loginAttempts },
       });
+      logger.warn('Account locked due to failed attempts', { userId: user._id, ip });
     }
 
-    // Audit log
     auditService.logAuthEvent({
       userId: user._id,
       action: 'LOGIN_FAILED',
@@ -159,11 +169,11 @@ const login = async (email, password, ip, userAgent) => {
   // Reset login attempts on successful login
   await user.resetLoginAttempts();
 
-  // Generate tokens
+  // Generate tokens — new family created on login
   const accessToken = tokenService.generateAccessToken(user._id, user.role);
   const refreshTokenRaw = tokenService.generateRefreshToken();
 
-  // Save hashed refresh token to DB
+  // Save refresh token (new family, since this is a fresh login)
   await tokenService.saveRefreshToken(user._id, refreshTokenRaw, ip, userAgent);
 
   // Audit log
@@ -175,6 +185,8 @@ const login = async (email, password, ip, userAgent) => {
     success: true,
   });
 
+  logger.info('User logged in', { userId: user._id, ip });
+
   return {
     user: user.toJSON(),
     accessToken,
@@ -184,53 +196,78 @@ const login = async (email, password, ip, userAgent) => {
 
 /**
  * Refresh the access token using a valid refresh token.
- * Implements refresh token rotation.
+ * Implements refresh token rotation with reuse detection.
+ *
+ * Flow:
+ *   1. SHA-256 hash the raw token → O(1) indexed lookup
+ *   2. If no match found → invalid token (401)
+ *   3. If token is marked "isUsed" → REUSE DETECTED
+ *      → Revoke entire token family (all sessions in that lineage)
+ *      → This means an attacker who stole an old token AND the real user
+ *        who already rotated both lose access — forcing re-login
+ *   4. If token is active → mark as used, create new token in same family
  */
 const refresh = async (refreshTokenRaw, ip, userAgent) => {
   if (!refreshTokenRaw) {
     throw ApiError.unauthorized(MESSAGES.NO_REFRESH_TOKEN);
   }
 
-  // We need to find which user this token belongs to.
-  // Since tokens are hashed, we check all active tokens.
-  // Optimization: In production, you'd want to store userId in the cookie or a signed JWT.
-  const RefreshToken = require('../models/RefreshToken');
-  const allTokens = await RefreshToken.find({});
+  // O(1) lookup using SHA-256 hash + index
+  const tokenDoc = await tokenService.findRefreshToken(refreshTokenRaw);
 
-  let matchedTokenDoc = null;
-  const bcrypt = require('bcryptjs');
-
-  for (const tokenDoc of allTokens) {
-    const isMatch = await bcrypt.compare(refreshTokenRaw, tokenDoc.tokenHash);
-    if (isMatch) {
-      matchedTokenDoc = tokenDoc;
-      break;
-    }
-  }
-
-  if (!matchedTokenDoc) {
+  if (!tokenDoc) {
+    // Token not found at all — either invalid or already cleaned up
+    logger.warn('Refresh attempted with unknown token', { ip });
     throw ApiError.unauthorized(MESSAGES.INVALID_TOKEN);
   }
 
+  // ── REUSE DETECTION ──────────────────────────────────
+  // If this token was already used (rotated), someone is replaying it.
+  // This indicates potential token theft — revoke the entire family.
+  if (tokenDoc.isUsed) {
+    logger.warn('SECURITY: Refresh token reuse detected! Revoking token family.', {
+      userId: tokenDoc.userId,
+      family: tokenDoc.family,
+      ip,
+      userAgent,
+    });
+
+    // Revoke ALL tokens in this family
+    await tokenService.revokeFamilyTokens(tokenDoc.family);
+
+    // Audit log with security flag
+    auditService.logAuthEvent({
+      userId: tokenDoc.userId,
+      action: 'TOKEN_REFRESH',
+      ip,
+      userAgent,
+      success: false,
+      metadata: { reason: 'token_reuse_detected', family: tokenDoc.family },
+    });
+
+    throw ApiError.unauthorized('Suspicious activity detected. Please log in again.');
+  }
+
   // Check expiry
-  if (matchedTokenDoc.expiresAt < new Date()) {
-    await RefreshToken.deleteToken(matchedTokenDoc._id);
+  if (tokenDoc.expiresAt < new Date()) {
+    const RefreshToken = require('../models/RefreshToken');
+    await RefreshToken.deleteToken(tokenDoc._id);
     throw ApiError.unauthorized(MESSAGES.REFRESH_TOKEN_EXPIRED);
   }
 
-  const userId = matchedTokenDoc.userId;
+  const userId = tokenDoc.userId;
 
   // Find the user
   const user = await User.findById(userId);
   if (!user) {
-    await RefreshToken.deleteToken(matchedTokenDoc._id);
+    const RefreshToken = require('../models/RefreshToken');
+    await RefreshToken.deleteToken(tokenDoc._id);
     throw ApiError.unauthorized(MESSAGES.USER_NOT_FOUND);
   }
 
-  // Rotate: delete old token, generate + save new one
+  // Rotate: mark old as used, generate new token in same family
   const { rawToken: newRefreshToken } = await tokenService.rotateRefreshToken(
-    userId,
-    matchedTokenDoc._id,
+    tokenDoc,
     ip,
     userAgent
   );
@@ -254,7 +291,7 @@ const refresh = async (refreshTokenRaw, ip, userAgent) => {
 };
 
 /**
- * Logout — delete refresh token and clear cookie.
+ * Logout — delete all refresh tokens for the user and clear cookie.
  */
 const logout = async (userId, ip, userAgent) => {
   await tokenService.deleteAllRefreshTokens(userId);
@@ -267,6 +304,8 @@ const logout = async (userId, ip, userAgent) => {
     userAgent,
     success: true,
   });
+
+  logger.info('User logged out', { userId, ip });
 
   return { message: MESSAGES.LOGOUT_SUCCESS };
 };
@@ -301,6 +340,8 @@ const forgotPassword = async (email, ip, userAgent) => {
     userAgent,
     success: true,
   });
+
+  logger.info('Password reset requested', { userId: user._id, email });
 
   return { message: MESSAGES.PASSWORD_RESET_SENT };
 };
@@ -340,6 +381,8 @@ const resetPassword = async (rawToken, newPassword, ip, userAgent) => {
     userAgent,
     success: true,
   });
+
+  logger.info('Password reset completed', { userId: user._id });
 
   return { message: MESSAGES.PASSWORD_RESET_SUCCESS };
 };
