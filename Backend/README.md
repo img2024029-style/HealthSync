@@ -42,18 +42,17 @@ npm start
 Backend/
 ├── src/
 │   ├── config/             # Configuration (DB, JWT, cookies, env validation)
-│   ├── constants/          # Enum-like constants (roles, token types, messages)
+│   ├── constants/          # Enum-like constants (roles, messages)
 │   ├── controllers/        # Thin request handlers (delegate to services)
-│   ├── helpers/            # Convenience wrappers (email, password, audit)
-│   ├── middleware/         # Express middleware (auth, security, rate limit, errors)
-│   ├── models/             # Mongoose schemas (User, RefreshToken, AuditLog)
+│   ├── middleware/         # Express middleware (auth, security, rate limit, errors, requestId)
+│   ├── models/             # Mongoose schemas (User, Hospital, RefreshToken, AuditLog)
 │   ├── routes/             # Route definitions with middleware chains
 │   ├── services/           # Core business logic (auth, token, email, audit)
-│   ├── utils/              # Utility classes (ApiError, ApiResponse, async handler)
+│   ├── utils/              # Utility classes (ApiError, ApiResponse, async handler, logger)
 │   ├── validators/         # express-validator chains per endpoint
 │   ├── app.js              # Express app configuration and middleware order
 │   └── server.js           # Server entry point with graceful shutdown
-├── tests/                  # Test placeholders (jest/mocha)
+├── tests/                  # Integration tests (Jest & Supertest)
 ├── .env.example            # Environment variable template
 ├── .gitignore
 ├── nodemon.json
@@ -67,16 +66,20 @@ Backend/
 
 ### Authentication Routes (`/api/auth`)
 
-| Method | Endpoint                    | Auth Required | Rate Limit         | Description                   |
-|--------|-----------------------------|---------------|--------------------|------------------------------ |
-| POST   | `/api/auth/register`        | ❌            | 3 req / 1 hour     | Register a new user           |
-| POST   | `/api/auth/login`           | ❌            | 5 req / 15 min     | Login and get tokens          |
-| POST   | `/api/auth/logout`          | ✅            | General             | Logout and clear tokens       |
-| POST   | `/api/auth/refresh`         | ❌ (cookie)   | General             | Refresh access token          |
-| GET    | `/api/auth/me`              | ✅            | General             | Get current user profile      |
-| GET    | `/api/auth/verify-email/:token` | ❌        | General             | Verify email address          |
-| POST   | `/api/auth/forgot-password` | ❌            | 5 req / 15 min     | Request password reset        |
-| POST   | `/api/auth/reset-password/:token` | ❌      | General             | Reset password with token     |
+| Method | Endpoint                     | Auth Required | Rate Limit         | Description                   |
+|--------|------------------------------|---------------|--------------------|------------------------------ |
+| POST   | `/api/auth/register`         | ❌            | 3 req / 1 hour     | Register a new user           |
+| POST   | `/api/auth/register/hospital`| ❌            | 3 req / 1 hour     | Register a new hospital       |
+| POST   | `/api/auth/login`            | ❌            | 5 req / 15 min     | Login and get tokens          |
+| POST   | `/api/auth/logout`           | ✅            | General            | Logout and clear cookie       |
+| POST   | `/api/auth/logout/all`       | ✅            | General            | Logout from all sessions      |
+| POST   | `/api/auth/refresh`          | ❌ (cookie)   | General            | Refresh access token          |
+| GET    | `/api/auth/me`               | ✅            | General            | Get current user profile      |
+| POST   | `/api/auth/verify-email`     | ❌            | 5 req / 1 hour     | Verify email using token      |
+| POST   | `/api/auth/resend-verification`| ❌          | 5 req / 1 hour     | Resend verification email     |
+| POST   | `/api/auth/forgot-password`  | ❌            | 3 req / 1 hour     | Request password reset link   |
+| POST   | `/api/auth/reset-password`   | ❌            | 3 req / 1 hour     | Reset password using token    |
+| POST   | `/api/auth/change-password`  | ✅            | 5 req / 15 min     | Change password               |
 
 ### Request/Response Examples
 
@@ -88,14 +91,14 @@ POST /api/auth/register
   "lastName": "Sharma",
   "email": "rahul@example.com",
   "mobileNumber": "9876543210",
-  "password": "SecureP@ss1"
+  "password": "SecureP@ss1!"
 }
 
 Response (201):
 {
   "success": true,
   "statusCode": 201,
-  "message": "Registration successful. Please verify your email.",
+  "message": "Registration successful.",
   "data": {
     "_id": "...",
     "fullName": { "firstName": "Rahul", "lastName": "Sharma" },
@@ -114,7 +117,7 @@ Response (201):
 POST /api/auth/login
 {
   "email": "rahul@example.com",
-  "password": "SecureP@ss1"
+  "password": "SecureP@ss1!"
 }
 
 Response (200):
@@ -151,7 +154,7 @@ Response (200):
 | 1  | JWT Access Token (15 min)   | ✅     |
 | 2  | JWT Refresh Token (7 days)  | ✅     |
 | 3  | Refresh Token Rotation      | ✅     |
-| 4  | Hashed Refresh Tokens (bcrypt) | ✅  |
+| 4  | Hashed Refresh Tokens (SHA-256) | ✅  |
 | 5  | bcrypt Password Hashing (12 rounds) | ✅ |
 | 6  | Secure HttpOnly Cookies     | ✅     |
 | 7  | Rate Limiting (per-route)   | ✅     |
@@ -177,16 +180,17 @@ Response (200):
 | Variable               | Required | Description                          |
 |------------------------|----------|--------------------------------------|
 | `PORT`                 | Yes      | Server port (default: 5000)          |
-| `NODE_ENV`             | Yes      | `development` or `production`        |
+| `NODE_ENV`             | Yes      | `development`, `production` or `test`|
 | `MONGO_URI`            | Yes      | MongoDB connection string            |
+| `MONGO_URI_TEST`       | Yes (Test)| Test MongoDB connection string       |
 | `ACCESS_TOKEN_SECRET`  | Yes      | JWT secret (min 64 chars)            |
 | `REFRESH_TOKEN_SECRET` | Yes      | Refresh token secret (min 64 chars)  |
 | `CLIENT_URL`           | Yes      | Frontend URL for CORS                |
-| `EMAIL_HOST`           | Prod     | SMTP host                            |
-| `EMAIL_PORT`           | Prod     | SMTP port                            |
-| `EMAIL_USER`           | Prod     | SMTP username                        |
-| `EMAIL_PASS`           | Prod     | SMTP password                        |
-| `EMAIL_FROM`           | No       | Sender name and email                |
+| `SMTP_HOST`            | No       | SMTP host for email sending          |
+| `SMTP_PORT`            | No       | SMTP port                            |
+| `SMTP_USER`            | No       | SMTP username                        |
+| `SMTP_PASS`            | No       | SMTP password                        |
+| `SMTP_FROM`            | No       | Sender email address                 |
 
 ---
 
@@ -195,35 +199,17 @@ Response (200):
 ### Middleware Order (as configured in `app.js`)
 
 ```
-1. helmet()         → Secure HTTP headers
+1. requestId        → Unique tracking ID for request logs
 2. cors()           → Origin-restricted CORS
-3. morgan()         → Request logging (dev only)
-4. compression()    → Response compression
-5. express.json()   → Body parser
-6. cookieParser()   → Parse cookies
-7. mongoSanitize()  → Block NoSQL injection
-8. hpp()            → Prevent parameter pollution
-9. xss()            → Strip XSS payloads
-10. generalLimiter  → 100 req / 15 min
-11. routes          → API route handlers
-12. notFound        → 404 handler
-13. errorHandler    → Global error handler
-```
-
-### Authentication Flow
-
-```
-Register → Validate → Hash Password → Save → Send Verification Email
-
-Login → Validate → Check Lockout → bcrypt.compare() → Check Verified
-     → Reset Attempts → Generate Access Token → Generate Refresh Token
-     → Hash & Store Refresh Token → Set Cookie → Return User
-
-Refresh → Read Cookie → bcrypt.compare(token, hash) → Delete Old Token
-       → Generate New Refresh Token → Hash & Store → Set Cookie
-       → Generate New Access Token → Return
-
-Logout → Delete All Refresh Tokens → Clear Cookie
+3. applySecurity()  → Helmet, HPP, XSS, Mongo Sanitization
+4. morgan()         → Request logging (via Winston stream)
+5. compression()    → Response compression
+6. express.json()   → Body parser
+7. cookieParser()   → Parse cookies
+8. generalLimiter  → 100 req / 15 min
+9. routes          → API route handlers
+10. notFound        → 404 handler
+11. errorHandler    → Global error handler
 ```
 
 ---
