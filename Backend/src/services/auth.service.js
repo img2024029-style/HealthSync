@@ -1,30 +1,34 @@
 /**
  * Auth service — core business logic for authentication.
  * Controllers delegate all logic here.
- *
- * Key improvements:
- *   - Refresh tokens use SHA-256 → O(1) lookup (no bcrypt scan)
- *   - Token family tracking with reuse detection
- *   - If a used token is replayed → entire family revoked (theft protection)
- *   - Structured logging via logger utility
  */
+const crypto = require('crypto');
+const UAParser = require('ua-parser-js');
 const User = require('../models/User');
 const Hospital = require('../models/Hospital');
 const tokenService = require('./token.service');
 const auditService = require('./audit.service');
+const emailService = require('./email.service');
 const ApiError = require('../utils/ApiError');
 const logger = require('../utils/logger');
 const MESSAGES = require('../constants/messages');
 const ROLES = require('../constants/roles');
 
+// Helper to hash tokens with SHA-256
+const hashToken = (token) => {
+  return crypto.createHash('sha256').update(token).digest('hex');
+};
+
+// Helper to parse device from user agent
+const parseDevice = (userAgent) => {
+  if (!userAgent) return 'Unknown';
+  const parser = new UAParser(userAgent);
+  const result = parser.getResult();
+  return result.device.type ? result.device.type : 'Desktop';
+};
+
 /**
  * Register a new user.
- *
- * NOTE: Email verification is temporarily bypassed — accounts are created
- * with isVerified: true directly, and no verification email is sent. This
- * is a stopgap until SMTP credentials are configured (see .env.example).
- * To re-enable: set isVerified back to its schema default (remove the
- * override below) and uncomment the verification token + email block.
  */
 const register = async (userData, ip, userAgent) => {
   const { firstName, lastName, email, mobileNumber, password } = userData;
@@ -41,14 +45,24 @@ const register = async (userData, ip, userAgent) => {
     throw ApiError.conflict(MESSAGES.MOBILE_ALREADY_EXISTS);
   }
 
-  // Create user (auto-verified — see NOTE above)
+  // Generate Email Verification Token
+  const rawVerificationToken = crypto.randomBytes(32).toString('hex');
+  const hashedVerificationToken = hashToken(rawVerificationToken);
+  const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+  // Create user (unverified initially)
   const user = await User.create({
     fullName: { firstName, lastName },
     email,
     mobileNumber,
     password,
-    isVerified: true,
+    isVerified: false,
+    verificationToken: hashedVerificationToken,
+    verificationExpiry,
   });
+
+  // Send email (non-blocking)
+  emailService.sendVerificationEmail(email, rawVerificationToken);
 
   // Audit log
   auditService.logAuthEvent({
@@ -69,9 +83,6 @@ const register = async (userData, ip, userAgent) => {
 
 /**
  * Register a new hospital account.
- * Mirrors `register()` above but against the Hospital collection, which has
- * its own required fields (registrationNumber, hospitalType, address, ...).
- * Email verification is bypassed here too, for the same reason.
  */
 const registerHospital = async (hospitalData, ip, userAgent) => {
   const {
@@ -103,6 +114,11 @@ const registerHospital = async (hospitalData, ip, userAgent) => {
     throw ApiError.conflict(MESSAGES.REGISTRATION_NUMBER_ALREADY_EXISTS);
   }
 
+  // Generate Email Verification Token
+  const rawVerificationToken = crypto.randomBytes(32).toString('hex');
+  const hashedVerificationToken = hashToken(rawVerificationToken);
+  const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
   const hospital = await Hospital.create({
     name,
     email,
@@ -111,8 +127,13 @@ const registerHospital = async (hospitalData, ip, userAgent) => {
     registrationNumber,
     hospitalType,
     address: { street, city, state, pincode, country },
-    isVerified: true,
+    isVerified: false,
+    verificationToken: hashedVerificationToken,
+    verificationExpiry,
   });
+
+  // Send email (non-blocking)
+  emailService.sendVerificationEmail(email, rawVerificationToken);
 
   auditService.logAuthEvent({
     userId: hospital._id,
@@ -133,10 +154,8 @@ const registerHospital = async (hospitalData, ip, userAgent) => {
 
 /**
  * Login a patient (User collection).
- * Includes account lockout after repeated failed attempts.
  */
 const loginPatient = async (email, password, ip, userAgent) => {
-  // Find user with password and lockout fields
   const user = await User.findOne({ email }).select('+password +loginAttempts +lockUntil');
 
   if (!user) {
@@ -162,7 +181,6 @@ const loginPatient = async (email, password, ip, userAgent) => {
   if (!isMatch) {
     await user.incrementLoginAttempts();
 
-    // Check if this attempt triggers a lock
     const updatedUser = await User.findById(user._id).select('+loginAttempts +lockUntil');
     if (updatedUser.isLocked()) {
       auditService.logAuthEvent({
@@ -188,25 +206,33 @@ const loginPatient = async (email, password, ip, userAgent) => {
     throw ApiError.unauthorized(MESSAGES.INVALID_CREDENTIALS);
   }
 
-  // Note: email-verification gate removed. Verification is bypassed at
-  // registration (isVerified: true is set directly, see register()) and
-  // there is no verify-email endpoint anymore for an account to ever
-  // flip isVerified from false to true — so this check could only ever
-  // permanently lock out accounts created before that bypass, with no
-  // way to recover. Since verification isn't actually enforced anywhere
-  // else in the app, gating login on it served no purpose.
+  // Enforce email verification check
+  if (!user.isVerified) {
+    auditService.logAuthEvent({
+      userId: user._id,
+      action: 'LOGIN_FAILED',
+      ip,
+      userAgent,
+      success: false,
+      metadata: { reason: 'email_not_verified' },
+    });
+    throw ApiError.forbidden(MESSAGES.EMAIL_NOT_VERIFIED);
+  }
 
-  // Reset login attempts on successful login
-  await user.resetLoginAttempts();
+  // Reset attempts and update login details
+  user.loginAttempts = 0;
+  user.lockUntil = null;
+  user.lastLogin = new Date();
+  user.lastLoginIP = ip || null;
+  user.lastLoginDevice = parseDevice(userAgent);
+  await user.save();
 
-  // Generate tokens — new family created on login
+  // Generate tokens
   const accessToken = tokenService.generateAccessToken(user._id, user.role);
   const refreshTokenRaw = tokenService.generateRefreshToken();
 
-  // Save refresh token (new family, since this is a fresh login)
   await tokenService.saveRefreshToken(user._id, refreshTokenRaw, ip, userAgent);
 
-  // Audit log
   auditService.logAuthEvent({
     userId: user._id,
     action: 'LOGIN',
@@ -226,19 +252,45 @@ const loginPatient = async (email, password, ip, userAgent) => {
 
 /**
  * Login a hospital (Hospital collection).
- * Simpler than loginPatient — the Hospital model has no lockout or email
- * verification fields, so those checks don't apply here.
  */
 const loginHospital = async (email, password, ip, userAgent) => {
-  const hospital = await Hospital.findOne({ email }).select('+password');
+  const hospital = await Hospital.findOne({ email }).select('+password +loginAttempts +lockUntil');
 
   if (!hospital) {
     throw ApiError.unauthorized(MESSAGES.INVALID_CREDENTIALS);
   }
 
+  // Check if account is locked
+  if (hospital.isLocked()) {
+    auditService.logAuthEvent({
+      userId: hospital._id,
+      action: 'LOGIN_FAILED',
+      ip,
+      userAgent,
+      success: false,
+      metadata: { reason: 'account_locked', role: ROLES.HOSPITAL },
+    });
+    throw ApiError.forbidden(MESSAGES.ACCOUNT_LOCKED);
+  }
+
   const isMatch = await hospital.comparePassword(password);
 
   if (!isMatch) {
+    await hospital.incrementLoginAttempts();
+
+    const updatedHospital = await Hospital.findById(hospital._id).select('+loginAttempts +lockUntil');
+    if (updatedHospital.isLocked()) {
+      auditService.logAuthEvent({
+        userId: hospital._id,
+        action: 'ACCOUNT_LOCKED',
+        ip,
+        userAgent,
+        success: false,
+        metadata: { loginAttempts: updatedHospital.loginAttempts, role: ROLES.HOSPITAL },
+      });
+      logger.warn('Hospital account locked due to failed attempts', { hospitalId: hospital._id, ip });
+    }
+
     auditService.logAuthEvent({
       userId: hospital._id,
       action: 'LOGIN_FAILED',
@@ -253,6 +305,27 @@ const loginHospital = async (email, password, ip, userAgent) => {
   if (hospital.isActive === false) {
     throw ApiError.forbidden('This hospital account has been deactivated.');
   }
+
+  // Enforce email verification check
+  if (!hospital.isVerified) {
+    auditService.logAuthEvent({
+      userId: hospital._id,
+      action: 'LOGIN_FAILED',
+      ip,
+      userAgent,
+      success: false,
+      metadata: { reason: 'email_not_verified', role: ROLES.HOSPITAL },
+    });
+    throw ApiError.forbidden(MESSAGES.EMAIL_NOT_VERIFIED);
+  }
+
+  // Reset attempts and update login details
+  hospital.loginAttempts = 0;
+  hospital.lockUntil = null;
+  hospital.lastLogin = new Date();
+  hospital.lastLoginIP = ip || null;
+  hospital.lastLoginDevice = parseDevice(userAgent);
+  await hospital.save();
 
   const accessToken = tokenService.generateAccessToken(hospital._id, ROLES.HOSPITAL);
   const refreshTokenRaw = tokenService.generateRefreshToken();
@@ -278,9 +351,7 @@ const loginHospital = async (email, password, ip, userAgent) => {
 };
 
 /**
- * Login dispatcher — routes to the correct collection based on role.
- * Defaults to 'patient' when role is omitted (keeps the existing patient
- * flow working unchanged for any caller that doesn't pass a role).
+ * Login dispatcher.
  */
 const login = async (email, password, role, ip, userAgent) => {
   if (role === ROLES.HOSPITAL) {
@@ -290,35 +361,21 @@ const login = async (email, password, role, ip, userAgent) => {
 };
 
 /**
- * Refresh the access token using a valid refresh token.
- * Implements refresh token rotation with reuse detection.
- *
- * Flow:
- *   1. SHA-256 hash the raw token → O(1) indexed lookup
- *   2. If no match found → invalid token (401)
- *   3. If token is marked "isUsed" → REUSE DETECTED
- *      → Revoke entire token family (all sessions in that lineage)
- *      → This means an attacker who stole an old token AND the real user
- *        who already rotated both lose access — forcing re-login
- *   4. If token is active → mark as used, create new token in same family
+ * Refresh access token.
  */
 const refresh = async (refreshTokenRaw, ip, userAgent) => {
   if (!refreshTokenRaw) {
     throw ApiError.unauthorized(MESSAGES.NO_REFRESH_TOKEN);
   }
 
-  // O(1) lookup using SHA-256 hash + index
   const tokenDoc = await tokenService.findRefreshToken(refreshTokenRaw);
 
   if (!tokenDoc) {
-    // Token not found at all — either invalid or already cleaned up
     logger.warn('Refresh attempted with unknown token', { ip });
     throw ApiError.unauthorized(MESSAGES.INVALID_TOKEN);
   }
 
-  // ── REUSE DETECTION ──────────────────────────────────
-  // If this token was already used (rotated), someone is replaying it.
-  // This indicates potential token theft — revoke the entire family.
+  // REUSE DETECTION
   if (tokenDoc.isUsed) {
     logger.warn('SECURITY: Refresh token reuse detected! Revoking token family.', {
       userId: tokenDoc.userId,
@@ -327,10 +384,8 @@ const refresh = async (refreshTokenRaw, ip, userAgent) => {
       userAgent,
     });
 
-    // Revoke ALL tokens in this family
     await tokenService.revokeFamilyTokens(tokenDoc.family);
 
-    // Audit log with security flag
     auditService.logAuthEvent({
       userId: tokenDoc.userId,
       action: 'TOKEN_REFRESH',
@@ -352,9 +407,6 @@ const refresh = async (refreshTokenRaw, ip, userAgent) => {
 
   const userId = tokenDoc.userId;
 
-  // The RefreshToken collection is shared across account types (User and
-  // Hospital), so we don't know which collection this id belongs to —
-  // try User first, fall back to Hospital.
   let account = await User.findById(userId);
   let role = account ? ROLES.USER : null;
 
@@ -369,17 +421,14 @@ const refresh = async (refreshTokenRaw, ip, userAgent) => {
     throw ApiError.unauthorized(MESSAGES.USER_NOT_FOUND);
   }
 
-  // Rotate: mark old as used, generate new token in same family
   const { rawToken: newRefreshToken } = await tokenService.rotateRefreshToken(
     tokenDoc,
     ip,
     userAgent
   );
 
-  // Generate new access token
   const accessToken = tokenService.generateAccessToken(userId, role);
 
-  // Audit log
   auditService.logAuthEvent({
     userId,
     action: 'TOKEN_REFRESH',
@@ -395,12 +444,11 @@ const refresh = async (refreshTokenRaw, ip, userAgent) => {
 };
 
 /**
- * Logout — delete all refresh tokens for the user and clear cookie.
+ * Logout.
  */
 const logout = async (userId, ip, userAgent) => {
   await tokenService.deleteAllRefreshTokens(userId);
 
-  // Audit log
   auditService.logAuthEvent({
     userId,
     action: 'LOGOUT',
@@ -416,8 +464,6 @@ const logout = async (userId, ip, userAgent) => {
 
 /**
  * Get current user profile.
- * `role` comes from the verified JWT (req.user.role) and determines which
- * collection to look the account up in.
  */
 const getCurrentUser = async (userId, role) => {
   const Model = role === ROLES.HOSPITAL ? Hospital : User;
@@ -430,6 +476,216 @@ const getCurrentUser = async (userId, role) => {
   return { user: account.toJSON() };
 };
 
+/**
+ * Verify Email using token.
+ */
+const verifyEmail = async (token, ip, userAgent) => {
+  const hashed = hashToken(token);
+
+  // Search User first
+  let account = await User.findOne({
+    verificationToken: hashed,
+    verificationExpiry: { $gt: new Date() },
+  });
+  let role = ROLES.USER;
+
+  if (!account) {
+    account = await Hospital.findOne({
+      verificationToken: hashed,
+      verificationExpiry: { $gt: new Date() },
+    });
+    role = ROLES.HOSPITAL;
+  }
+
+  if (!account) {
+    throw ApiError.badRequest('Invalid or expired email verification token.');
+  }
+
+  account.isVerified = true;
+  account.verificationToken = null;
+  account.verificationExpiry = null;
+  await account.save();
+
+  auditService.logAuthEvent({
+    userId: account._id,
+    action: 'EMAIL_VERIFIED',
+    ip,
+    userAgent,
+    success: true,
+    metadata: { role },
+  });
+
+  return { message: 'Email verified successfully. You can now log in.' };
+};
+
+/**
+ * Resend Verification Email.
+ */
+const resendVerification = async (email, ip, userAgent) => {
+  let account = await User.findOne({ email });
+  let role = ROLES.USER;
+
+  if (!account) {
+    account = await Hospital.findOne({ email });
+    role = ROLES.HOSPITAL;
+  }
+
+  if (!account) {
+    throw ApiError.notFound('Account with this email does not exist.');
+  }
+
+  if (account.isVerified) {
+    throw ApiError.badRequest('This email address is already verified.');
+  }
+
+  const rawVerificationToken = crypto.randomBytes(32).toString('hex');
+  const hashedVerificationToken = hashToken(rawVerificationToken);
+
+  account.verificationToken = hashedVerificationToken;
+  account.verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  await account.save();
+
+  emailService.sendVerificationEmail(email, rawVerificationToken);
+
+  return { message: 'Verification link resent successfully.' };
+};
+
+/**
+ * Forgot Password (Request Password Reset).
+ */
+const forgotPassword = async (email, ip, userAgent) => {
+  let account = await User.findOne({ email });
+  let role = ROLES.USER;
+
+  if (!account) {
+    account = await Hospital.findOne({ email });
+    role = ROLES.HOSPITAL;
+  }
+
+  // To prevent user enumeration, return success even if account is not found.
+  if (!account) {
+    logger.info(`Forgot password request for non-existent email: ${email}`);
+    return { message: 'If that email address exists in our system, we have sent a reset link.' };
+  }
+
+  const rawResetToken = crypto.randomBytes(32).toString('hex');
+  const hashedResetToken = hashToken(rawResetToken);
+  const resetExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+  account.resetPasswordToken = hashedResetToken;
+  account.resetPasswordExpiry = resetExpiry;
+  await account.save();
+
+  emailService.sendPasswordResetEmail(email, rawResetToken);
+
+  auditService.logAuthEvent({
+    userId: account._id,
+    action: 'PASSWORD_RESET_REQUESTED',
+    ip,
+    userAgent,
+    success: true,
+    metadata: { role },
+  });
+
+  return { message: 'If that email address exists in our system, we have sent a reset link.' };
+};
+
+/**
+ * Reset Password using token.
+ */
+const resetPassword = async (token, newPassword, ip, userAgent) => {
+  const hashed = hashToken(token);
+
+  let account = await User.findOne({
+    resetPasswordToken: hashed,
+    resetPasswordExpiry: { $gt: new Date() },
+  });
+  let role = ROLES.USER;
+
+  if (!account) {
+    account = await Hospital.findOne({
+      resetPasswordToken: hashed,
+      resetPasswordExpiry: { $gt: new Date() },
+    });
+    role = ROLES.HOSPITAL;
+  }
+
+  if (!account) {
+    throw ApiError.badRequest('Invalid or expired password reset token.');
+  }
+
+  // Update password & security metadata
+  account.password = newPassword;
+  account.passwordChangedAt = new Date();
+  account.resetPasswordToken = null;
+  account.resetPasswordExpiry = null;
+  
+  // Unlock account in case it was locked
+  account.loginAttempts = 0;
+  account.lockUntil = null;
+  
+  await account.save();
+
+  // Revoke all existing sessions (forces re-login everywhere)
+  await tokenService.deleteAllRefreshTokens(account._id);
+
+  auditService.logAuthEvent({
+    userId: account._id,
+    action: 'PASSWORD_RESET_COMPLETED',
+    ip,
+    userAgent,
+    success: true,
+    metadata: { role },
+  });
+
+  return { message: 'Password reset successful. Please log in with your new password.' };
+};
+
+/**
+ * Change Password (Authenticated).
+ */
+const changePassword = async (userId, role, currentPassword, newPassword, ip, userAgent) => {
+  const Model = role === ROLES.HOSPITAL ? Hospital : User;
+  const account = await Model.findById(userId).select('+password');
+
+  if (!account) {
+    throw ApiError.notFound('Account not found.');
+  }
+
+  // Verify current password
+  const isMatch = await account.comparePassword(currentPassword);
+  if (!isMatch) {
+    auditService.logAuthEvent({
+      userId,
+      action: 'PASSWORD_CHANGED',
+      ip,
+      userAgent,
+      success: false,
+      metadata: { reason: 'incorrect_current_password', role },
+    });
+    throw ApiError.unauthorized('Incorrect current password.');
+  }
+
+  // Update password
+  account.password = newPassword;
+  account.passwordChangedAt = new Date();
+  await account.save();
+
+  // Revoke all existing sessions
+  await tokenService.deleteAllRefreshTokens(userId);
+
+  auditService.logAuthEvent({
+    userId,
+    action: 'PASSWORD_CHANGED',
+    ip,
+    userAgent,
+    success: true,
+    metadata: { role },
+  });
+
+  return { message: 'Password changed successfully. Please log in again.' };
+};
+
 module.exports = {
   register,
   registerHospital,
@@ -437,4 +693,9 @@ module.exports = {
   refresh,
   logout,
   getCurrentUser,
+  verifyEmail,
+  resendVerification,
+  forgotPassword,
+  resetPassword,
+  changePassword,
 };

@@ -1,7 +1,3 @@
-/**
- * Global error handler middleware.
- * Catches all errors and returns consistent JSON responses.
- */
 const ApiError = require('../utils/ApiError');
 
 // eslint-disable-next-line no-unused-vars
@@ -10,8 +6,8 @@ const errorHandler = (err, req, res, next) => {
   error.message = err.message;
   error.stack = err.stack;
 
-  // Log error in development
-  if (process.env.NODE_ENV === 'development') {
+  // Log error in development or test
+  if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
     console.error('─── ERROR ───────────────────────────────────────');
     console.error(err);
     console.error('─────────────────────────────────────────────────');

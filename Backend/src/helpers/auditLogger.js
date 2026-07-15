@@ -1,7 +1,3 @@
-/**
- * Audit logger helper.
- * Convenience wrapper around audit service.
- */
 const auditService = require('../services/audit.service');
 
 /**

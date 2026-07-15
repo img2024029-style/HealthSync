@@ -78,6 +78,56 @@ const hospitalSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    verificationToken: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    verificationExpiry: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+
+    // ─── Account Recovery ────────────────────────────
+    resetPasswordToken: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    resetPasswordExpiry: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+
+    // ─── Account Security & Auditing ─────────────────
+    passwordChangedAt: {
+      type: Date,
+      default: null,
+    },
+    lastLogin: {
+      type: Date,
+      default: null,
+    },
+    lastLoginIP: {
+      type: String,
+      default: null,
+    },
+    lastLoginDevice: {
+      type: String,
+      default: null,
+    },
+
+    // ─── Account Lockout ─────────────────────────────
+    loginAttempts: {
+      type: Number,
+      default: 0,
+    },
+    lockUntil: {
+      type: Date,
+      default: null,
+    },
     isActive: {
       type: Boolean,
       default: true,
@@ -98,10 +148,52 @@ hospitalSchema.methods.comparePassword = function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
+/**
+ * Check if the account is currently locked.
+ */
+hospitalSchema.methods.isLocked = function () {
+  return !!(this.lockUntil && this.lockUntil > Date.now());
+};
+
+/**
+ * Increment login attempts. Lock account after max attempts.
+ */
+hospitalSchema.methods.incrementLoginAttempts = async function () {
+  const { maxLoginAttempts, lockDurationMs } = require('../config/jwt.config');
+  // If previous lock has expired, reset attempts
+  if (this.lockUntil && this.lockUntil < Date.now()) {
+    return this.updateOne({
+      $set: { loginAttempts: 1 },
+      $unset: { lockUntil: 1 },
+    });
+  }
+
+  const updates = { $inc: { loginAttempts: 1 } };
+
+  // Lock account if we've reached max attempts
+  if (this.loginAttempts + 1 >= maxLoginAttempts) {
+    updates.$set = { lockUntil: new Date(Date.now() + lockDurationMs) };
+  }
+
+  return this.updateOne(updates);
+};
+
+/**
+ * Reset login attempts after successful login.
+ */
+hospitalSchema.methods.resetLoginAttempts = async function () {
+  return this.updateOne({
+    $set: { loginAttempts: 0 },
+    $unset: { lockUntil: 1 },
+  });
+};
+
 // Remove sensitive fields when converting to JSON (mirrors User.js)
 hospitalSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.password;
+  delete obj.loginAttempts;
+  delete obj.lockUntil;
   delete obj.__v;
   return obj;
 };

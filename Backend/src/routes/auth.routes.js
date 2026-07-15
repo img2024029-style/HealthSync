@@ -6,11 +6,21 @@ const { Router } = require('express');
 const authController = require('../controllers/auth.controller');
 const authenticate = require('../middleware/authenticate');
 const validate = require('../middleware/validate');
-const { authLimiter, registerLimiter } = require('../middleware/rateLimiter');
+const {
+  authLimiter,
+  registerLimiter,
+  forgotPasswordLimiter,
+  emailVerificationLimiter,
+} = require('../middleware/rateLimiter');
 const {
   registerValidator,
   registerHospitalValidator,
   loginValidator,
+  verifyEmailValidator,
+  resendVerificationValidator,
+  forgotPasswordValidator,
+  resetPasswordValidator,
+  changePasswordValidator,
 } = require('../validators/auth.validator');
 
 const router = Router();
@@ -50,13 +60,66 @@ router.post(
   authController.refresh
 );
 
+// Verify Email
+router.post(
+  '/verify-email',
+  emailVerificationLimiter,
+  verifyEmailValidator,
+  validate,
+  authController.verifyEmail
+);
+
+// Resend Email Verification Token
+router.post(
+  '/resend-verification',
+  emailVerificationLimiter,
+  resendVerificationValidator,
+  validate,
+  authController.resendVerification
+);
+
+// Request Password Reset Link
+router.post(
+  '/forgot-password',
+  forgotPasswordLimiter,
+  forgotPasswordValidator,
+  validate,
+  authController.forgotPassword
+);
+
+// Reset Password using Token
+router.post(
+  '/reset-password',
+  forgotPasswordLimiter,
+  resetPasswordValidator,
+  validate,
+  authController.resetPassword
+);
+
 // ─── Protected Routes ──────────────────────────────────
 
-// Logout (requires authentication)
+// Logout current session
 router.post(
   '/logout',
   authenticate,
   authController.logout
+);
+
+// Logout all sessions/devices
+router.post(
+  '/logout/all',
+  authenticate,
+  authController.logoutAll
+);
+
+// Change Password (authenticated)
+router.post(
+  '/change-password',
+  authenticate,
+  authLimiter,
+  changePasswordValidator,
+  validate,
+  authController.changePassword
 );
 
 // Get current user profile

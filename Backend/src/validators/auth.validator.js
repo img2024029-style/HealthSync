@@ -3,7 +3,7 @@
  * Validation chains for each auth endpoint using express-validator.
  */
 const { body } = require('express-validator');
-const { passwordValidation } = require('./password.validator');
+const { passwordValidation, getPasswordSchema } = require('./password.validator');
 
 /**
  * POST /api/auth/register
@@ -95,8 +95,6 @@ const registerHospitalValidator = [
 
 /**
  * POST /api/auth/login
- * `role` distinguishes which account collection to authenticate against
- * (defaults to 'patient' in the service layer if omitted).
  */
 const loginValidator = [
   body('email')
@@ -119,8 +117,71 @@ const loginValidator = [
     .withMessage("Role must be 'user' or 'hospital'."),
 ];
 
+/**
+ * POST /api/auth/verify-email
+ */
+const verifyEmailValidator = [
+  body('token')
+    .trim()
+    .notEmpty()
+    .withMessage('Verification token is required.'),
+];
+
+/**
+ * POST /api/auth/resend-verification
+ */
+const resendVerificationValidator = [
+  body('email')
+    .trim()
+    .notEmpty()
+    .withMessage('Email address is required.')
+    .isEmail()
+    .withMessage('Please provide a valid email address.')
+    .normalizeEmail(),
+];
+
+/**
+ * POST /api/auth/forgot-password
+ */
+const forgotPasswordValidator = [
+  body('email')
+    .trim()
+    .notEmpty()
+    .withMessage('Email address is required.')
+    .isEmail()
+    .withMessage('Please provide a valid email address.')
+    .normalizeEmail(),
+];
+
+/**
+ * POST /api/auth/reset-password
+ */
+const resetPasswordValidator = [
+  body('token')
+    .trim()
+    .notEmpty()
+    .withMessage('Password reset token is required.'),
+  passwordValidation,
+];
+
+/**
+ * POST /api/auth/change-password
+ */
+const changePasswordValidator = [
+  body('currentPassword')
+    .trim()
+    .notEmpty()
+    .withMessage('Current password is required.'),
+  getPasswordSchema('newPassword'),
+];
+
 module.exports = {
   registerValidator,
   registerHospitalValidator,
   loginValidator,
+  verifyEmailValidator,
+  resendVerificationValidator,
+  forgotPasswordValidator,
+  resetPasswordValidator,
+  changePasswordValidator,
 };

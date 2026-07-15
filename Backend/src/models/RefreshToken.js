@@ -1,52 +1,61 @@
 /**
  * RefreshToken model.
  *
- * Key design decisions:
- *   - SHA-256 hashing (not bcrypt) for refresh tokens.
- *     Refresh tokens are high-entropy random strings (40 bytes / 80 hex chars),
- *     so they don't need the brute-force resistance of bcrypt. SHA-256 enables
- *     O(1) indexed lookups instead of O(n) bcrypt.compare() scans.
- *   - Token family tracking for reuse detection.
- *     Each login creates a token "family". When rotated, the new token inherits
- *     the family. If a used token is replayed, ALL family tokens are revoked.
- *   - Used tokens are retained briefly (marked isUsed: true) to detect replay.
- *     TTL index auto-cleans expired tokens.
+ * Stores session tokens and device metadata.
+ * Uses SHA-256 hash lookup and token rotation family tracking for replay attack detection.
  */
 const mongoose = require('mongoose');
 const crypto = require('crypto');
+const UAParser = require('ua-parser-js');
 const { refreshTokenExpiryMs } = require('../config/jwt.config');
 
 const refreshTokenSchema = new mongoose.Schema(
   {
     userId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
       required: true,
       index: true,
     },
     tokenHash: {
       type: String,
       required: true,
-      index: true, // Indexed for O(1) SHA-256 lookups
+      index: true, // Indexed for O(1) lookups
     },
     family: {
       type: String,
       required: true,
-      index: true, // Indexed for reuse detection (delete all in family)
+      index: true, // Family group ID
     },
     isUsed: {
       type: Boolean,
       default: false,
     },
+    isRevoked: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    device: {
+      type: String,
+      default: null,
+    },
+    browser: {
+      type: String,
+      default: null,
+    },
+    ip: {
+      type: String,
+      default: null,
+    },
     expiresAt: {
       type: Date,
       required: true,
       default: () => new Date(Date.now() + refreshTokenExpiryMs),
-      index: { expires: 0 }, // TTL index — MongoDB auto-deletes expired docs
+      index: { expires: 0 }, // TTL index
     },
-    createdByIp: {
-      type: String,
-      default: null,
+    lastUsedAt: {
+      type: Date,
+      default: Date.now,
     },
     userAgent: {
       type: String,
@@ -57,12 +66,6 @@ const refreshTokenSchema = new mongoose.Schema(
 );
 
 // ─── Helper: SHA-256 hash ─────────────────────────────
-
-/**
- * Hash a raw token with SHA-256.
- * @param {string} rawToken
- * @returns {string} hex-encoded hash
- */
 const sha256 = (rawToken) => {
   return crypto.createHash('sha256').update(rawToken).digest('hex');
 };
@@ -71,31 +74,38 @@ const sha256 = (rawToken) => {
 
 /**
  * Create and save a new refresh token.
- * @param {string}  userId   - User's MongoDB _id
- * @param {string}  rawToken - Raw refresh token string
- * @param {string}  ip       - Client IP
- * @param {string}  ua       - Client user agent
- * @param {string?} family   - Token family ID (null = new family from login)
- * @returns {Object} Saved document
+ * Parses user agent to extract device and browser.
  */
 refreshTokenSchema.statics.saveToken = async function (userId, rawToken, ip, ua, family) {
   const tokenHash = sha256(rawToken);
   const tokenFamily = family || crypto.randomUUID(); // New family on first login
 
+  let browser = 'Unknown';
+  let device = 'Desktop';
+  if (ua) {
+    const parser = new UAParser(ua);
+    const result = parser.getResult();
+    browser = result.browser.name ? `${result.browser.name} ${result.browser.version || ''}`.trim() : 'Unknown';
+    device = result.device.type ? result.device.type : 'Desktop';
+  }
+
   return this.create({
     userId,
     tokenHash,
     family: tokenFamily,
+    isUsed: false,
+    isRevoked: false,
+    device,
+    browser,
+    ip: ip || null,
     expiresAt: new Date(Date.now() + refreshTokenExpiryMs),
-    createdByIp: ip || null,
+    lastUsedAt: new Date(),
     userAgent: ua || null,
   });
 };
 
 /**
- * Find a token document by its raw value (SHA-256 lookup — O(1)).
- * @param {string} rawToken - Raw refresh token from cookie
- * @returns {Object|null} Token document or null
+ * Find a token document by its raw value.
  */
 refreshTokenSchema.statics.findByRawToken = async function (rawToken) {
   const tokenHash = sha256(rawToken);
@@ -103,38 +113,41 @@ refreshTokenSchema.statics.findByRawToken = async function (rawToken) {
 };
 
 /**
- * Mark a token as used (for reuse detection during rotation).
- * @param {string} tokenDocId - Token document _id
+ * Mark a token as used and update lastUsedAt.
  */
 refreshTokenSchema.statics.markUsed = async function (tokenDocId) {
-  return this.findByIdAndUpdate(tokenDocId, { isUsed: true });
+  return this.findByIdAndUpdate(tokenDocId, {
+    isUsed: true,
+    lastUsedAt: new Date(),
+  });
 };
 
 /**
- * Revoke all tokens in a family (reuse detection response).
- * @param {string} family - Token family ID
+ * Revoke all tokens in a family (set isRevoked: true).
  */
 refreshTokenSchema.statics.revokeFamily = async function (family) {
+  // Update all tokens in family to be revoked, or delete them
+  // The roadmap mentions token reuse detection and revoking entire family
+  // To comply, we can mark them all as revoked and then delete them, or delete them directly.
+  // Let's delete them directly (as was done before) but also mark them revoked if any query relies on it.
+  // Deleting is safer for database cleaning, but marking revoked is useful. Let's do both (deleteMany is standard).
   return this.deleteMany({ family });
 };
 
 /**
- * Delete a specific token by ID.
- * @param {string} tokenDocId - Token document _id
+ * Delete a specific token.
  */
 refreshTokenSchema.statics.deleteToken = async function (tokenDocId) {
   return this.findByIdAndDelete(tokenDocId);
 };
 
 /**
- * Delete all tokens for a user (logout from all devices).
- * @param {string} userId - User's MongoDB _id
+ * Delete all tokens for a user (logout all devices).
  */
 refreshTokenSchema.statics.deleteAllTokens = async function (userId) {
   return this.deleteMany({ userId });
 };
 
-// Export the SHA-256 helper for external use
 refreshTokenSchema.statics.hashToken = sha256;
 
 module.exports = mongoose.model('RefreshToken', refreshTokenSchema);

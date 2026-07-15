@@ -30,6 +30,7 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const compression = require('compression');
 
+const requestId = require('./middleware/requestId');
 const applySecurity = require('./middleware/security');
 const { generalLimiter } = require('./middleware/rateLimiter');
 const { setupHttpLogger } = require('./utils/logger');
@@ -38,6 +39,9 @@ const errorHandler = require('./middleware/errorHandler');
 const routes = require('./routes');
 
 const app = express();
+
+// ─── 0. Request ID (Must be first for tracing) ───────────────
+app.use(requestId);
 
 // ─── 1. CORS ─────────────────────────────────────────────────
 const corsOptions = {

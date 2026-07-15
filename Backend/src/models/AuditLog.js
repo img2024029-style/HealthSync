@@ -4,7 +4,6 @@ const auditLogSchema = new mongoose.Schema(
   {
     userId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
       default: null,
       index: true,
     },
@@ -26,17 +25,25 @@ const auditLogSchema = new mongoose.Schema(
       ],
       index: true,
     },
+    success: {
+      type: Boolean,
+      default: true,
+    },
     ip: {
       type: String,
       default: null,
     },
-    userAgent: {
+    browser: {
       type: String,
       default: null,
     },
-    success: {
-      type: Boolean,
-      default: true,
+    device: {
+      type: String,
+      default: null,
+    },
+    location: {
+      type: String,
+      default: 'Unknown',
     },
     metadata: {
       type: mongoose.Schema.Types.Mixed,
@@ -44,13 +51,13 @@ const auditLogSchema = new mongoose.Schema(
     },
   },
   {
-    timestamps: true,
+    timestamps: { createdAt: 'timestamp', updatedAt: false }, // Use 'timestamp' for createdAt as specified in the roadmap
   }
 );
 
 // Compound index for querying by user + action
 auditLogSchema.index({ userId: 1, action: 1 });
 // Index for time-based queries
-auditLogSchema.index({ createdAt: 1 });
+auditLogSchema.index({ timestamp: 1 });
 
 module.exports = mongoose.model('AuditLog', auditLogSchema);

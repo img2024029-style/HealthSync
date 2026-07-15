@@ -7,7 +7,7 @@ const REFRESH_TOKEN_COOKIE_NAME = 'refreshToken';
 const getCookieOptions = () => ({
   httpOnly: true,                                    // Never expose to JavaScript
   secure: process.env.NODE_ENV === 'production',     // HTTPS only in production
-  sameSite: 'Lax',                                   // CSRF protection
+  sameSite: process.env.NODE_ENV === 'production' ? 'Strict' : 'Lax', // Strict CSRF protection in prod
   maxAge: 7 * 24 * 60 * 60 * 1000,                  // 7 days in milliseconds
   path: '/',
 });
@@ -18,7 +18,7 @@ const getCookieOptions = () => ({
 const getClearCookieOptions = () => ({
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
-  sameSite: 'Lax',
+  sameSite: process.env.NODE_ENV === 'production' ? 'Strict' : 'Lax',
   path: '/',
 });
 
