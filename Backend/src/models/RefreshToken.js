@@ -126,12 +126,7 @@ refreshTokenSchema.statics.markUsed = async function (tokenDocId) {
  * Revoke all tokens in a family (set isRevoked: true).
  */
 refreshTokenSchema.statics.revokeFamily = async function (family) {
-  // Update all tokens in family to be revoked, or delete them
-  // The roadmap mentions token reuse detection and revoking entire family
-  // To comply, we can mark them all as revoked and then delete them, or delete them directly.
-  // Let's delete them directly (as was done before) but also mark them revoked if any query relies on it.
-  // Deleting is safer for database cleaning, but marking revoked is useful. Let's do both (deleteMany is standard).
-  return this.deleteMany({ family });
+  return this.updateMany({ family }, { isRevoked: true });
 };
 
 /**
