@@ -228,9 +228,12 @@ describe('Authentication & Security Integration Tests', () => {
       expect(reuseRes.statusCode).toBe(401);
       expect(reuseRes.body.message).toContain('Suspicious activity');
 
-      // Verify refresh tokens are cleared in the database
-      const count = await RefreshToken.countDocuments({});
-      expect(count).toBe(0);
+      // Verify refresh tokens are marked as revoked in the database (no active tokens, 2 revoked)
+      const activeCount = await RefreshToken.countDocuments({ isRevoked: false });
+      expect(activeCount).toBe(0);
+
+      const revokedCount = await RefreshToken.countDocuments({ isRevoked: true });
+      expect(revokedCount).toBe(2);
     });
 
     it('should logout and clear cookies', async () => {
@@ -324,6 +327,148 @@ describe('Authentication & Security Integration Tests', () => {
       // Verify sessions are deleted
       const tokenCount = await RefreshToken.countDocuments({});
       expect(tokenCount).toBe(0);
+    });
+  });
+
+  // ─── 5. Additional Edge Cases & Security Behaviors ───
+  describe('Additional Edge Cases & Security Behaviors', () => {
+    let activeUser, activeAccessToken, activeRefreshToken;
+
+    beforeEach(async () => {
+      // Create and verify user
+      await request(app).post('/api/auth/register').send(testUser);
+      const rawToken = emailService.sendVerificationEmail.mock.calls[0][1];
+      await request(app).post('/api/auth/verify-email').send({ token: rawToken });
+
+      // Login to get tokens
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ email: testUser.email, password: testUser.password });
+      
+      activeUser = loginRes.body.data.user;
+      activeAccessToken = loginRes.body.data.accessToken;
+      activeRefreshToken = loginRes.headers['set-cookie'][0].split(';')[0].split('=')[1];
+    });
+
+    it('should reject expired access token', async () => {
+      // Generate expired access token manually
+      const jwt = require('jsonwebtoken');
+      const expiredToken = jwt.sign(
+        { sub: activeUser._id, role: 'user', type: 'access' },
+        process.env.ACCESS_TOKEN_SECRET,
+        { expiresIn: '-1s' }
+      );
+
+      const res = await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', `Bearer ${expiredToken}`);
+      
+      expect(res.statusCode).toBe(401);
+      expect(res.body.message).toContain('expired');
+    });
+
+    it('should reject invalid JWT signature', async () => {
+      const badSignatureToken = activeAccessToken + 'invalid';
+      const res = await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', `Bearer ${badSignatureToken}`);
+      
+      expect(res.statusCode).toBe(401);
+      expect(res.body.message).toContain('Invalid or expired token');
+    });
+
+    it('should reject expired refresh token', async () => {
+      // Simulate expired refresh token in DB
+      await RefreshToken.updateMany({}, { expiresAt: new Date(Date.now() - 1000) });
+
+      const res = await request(app)
+        .post('/api/auth/refresh')
+        .set('Cookie', `refreshToken=${activeRefreshToken}`);
+      
+      expect(res.statusCode).toBe(401);
+      expect(res.body.message).toContain('expired');
+    });
+
+    it('should reject invalid verification token', async () => {
+      const res = await request(app)
+        .post('/api/auth/verify-email')
+        .send({ token: 'invalid_verification_token' });
+      
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toContain('Invalid or expired');
+    });
+
+    it('should reject invalid reset password token', async () => {
+      const res = await request(app)
+        .post('/api/auth/reset-password')
+        .send({ token: 'invalid_reset_token', password: 'NewPassword123!' });
+      
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toContain('Invalid or expired');
+    });
+
+    it('should fail to refresh after logout', async () => {
+      // Logout
+      await request(app)
+        .post('/api/auth/logout')
+        .set('Authorization', `Bearer ${activeAccessToken}`)
+        .set('Cookie', `refreshToken=${activeRefreshToken}`);
+
+      // Try refresh
+      const res = await request(app)
+        .post('/api/auth/refresh')
+        .set('Cookie', `refreshToken=${activeRefreshToken}`);
+      
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('should fail to refresh after password change', async () => {
+      // Change password
+      await request(app)
+        .post('/api/auth/change-password')
+        .set('Authorization', `Bearer ${activeAccessToken}`)
+        .send({ currentPassword: testUser.password, newPassword: 'NewPassword123!' });
+
+      // Try refresh
+      const res = await request(app)
+        .post('/api/auth/refresh')
+        .set('Cookie', `refreshToken=${activeRefreshToken}`);
+      
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('should fail to refresh after logout all devices', async () => {
+      // Logout all devices
+      await request(app)
+        .post('/api/auth/logout/all')
+        .set('Authorization', `Bearer ${activeAccessToken}`);
+
+      // Try refresh
+      const res = await request(app)
+        .post('/api/auth/refresh')
+        .set('Cookie', `refreshToken=${activeRefreshToken}`);
+      
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('should enforce rate limiting behavior in production mode', async () => {
+      // Temporarily set NODE_ENV to production to test rate limiting
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+
+      try {
+        // Trigger forgot-password rate limiter (max 3 per hour)
+        // Make 4 requests
+        await request(app).post('/api/auth/forgot-password').send({ email: testUser.email });
+        await request(app).post('/api/auth/forgot-password').send({ email: testUser.email });
+        await request(app).post('/api/auth/forgot-password').send({ email: testUser.email });
+        const res = await request(app).post('/api/auth/forgot-password').send({ email: testUser.email });
+
+        expect(res.statusCode).toBe(429);
+      } finally {
+        // Restore original env
+        process.env.NODE_ENV = originalEnv;
+      }
     });
   });
 });

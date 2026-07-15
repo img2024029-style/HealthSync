@@ -83,10 +83,11 @@ const login = asyncHandler(async (req, res) => {
  * POST /api/auth/logout
  */
 const logout = asyncHandler(async (req, res) => {
+  const refreshToken = req.cookies[REFRESH_TOKEN_COOKIE_NAME];
   const ip = req.ip;
   const userAgent = req.headers['user-agent'];
 
-  await authService.logout(req.user.id, ip, userAgent);
+  await authService.logout(req.user.id, refreshToken, ip, userAgent);
 
   // Clear the refresh token cookie
   res.clearCookie(REFRESH_TOKEN_COOKIE_NAME, getClearCookieOptions());
@@ -102,8 +103,8 @@ const logoutAll = asyncHandler(async (req, res) => {
   const ip = req.ip;
   const userAgent = req.headers['user-agent'];
 
-  // Delete all refresh tokens for the user
-  await authService.logout(req.user.id, ip, userAgent);
+  // Delete all refresh tokens for the user (null token param deletes all sessions)
+  await authService.logout(req.user.id, null, ip, userAgent);
 
   res.clearCookie(REFRESH_TOKEN_COOKIE_NAME, getClearCookieOptions());
 

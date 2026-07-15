@@ -25,7 +25,11 @@ const { accessTokenExpiry } = require('../config/jwt.config');
  */
 const generateAccessToken = (userId, role) => {
   return jwt.sign(
-    { id: userId, role },
+    {
+      sub: userId,
+      role,
+      type: 'access',
+    },
     process.env.ACCESS_TOKEN_SECRET,
     { expiresIn: accessTokenExpiry }
   );
@@ -123,6 +127,15 @@ const deleteAllRefreshTokens = async (userId) => {
   return RefreshToken.deleteAllTokens(userId);
 };
 
+/**
+ * Delete a specific refresh token by its raw value.
+ * @param {string} rawToken - Raw refresh token string
+ */
+const deleteRefreshToken = async (rawToken) => {
+  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+  return RefreshToken.deleteOne({ tokenHash });
+};
+
 module.exports = {
   generateAccessToken,
   generateRefreshToken,
@@ -132,4 +145,5 @@ module.exports = {
   rotateRefreshToken,
   revokeFamilyTokens,
   deleteAllRefreshTokens,
+  deleteRefreshToken,
 };

@@ -27,3 +27,5 @@ coverage/
 # Build
 dist/
 build/
+
+mongodb_data/

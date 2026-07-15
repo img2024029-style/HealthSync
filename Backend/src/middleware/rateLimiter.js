@@ -1,24 +1,26 @@
 /**
  * Rate limiting middleware.
  * Different limits for different route groups.
- * Limiters are bypassed when NODE_ENV is 'test' to prevent test suite interference.
+ * Limiters are bypassed when NODE_ENV is 'test' or 'development' to prevent local development blocks.
  */
 const rateLimit = require('express-rate-limit');
 const { rateLimits } = require('../config/jwt.config');
 const MESSAGES = require('../constants/messages');
 
-// Helper to bypass rate limiting in test environment
-const skipInTest = (limiter) => {
-  if (process.env.NODE_ENV === 'test') {
-    return (req, res, next) => next();
-  }
-  return limiter;
+// Helper to bypass rate limiting in development and test environments
+const skipInDevAndTest = (limiter) => {
+  return (req, res, next) => {
+    if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') {
+      return next();
+    }
+    return limiter(req, res, next);
+  };
 };
 
 /**
  * General API rate limiter — 100 requests per 15 minutes.
  */
-const generalLimiter = skipInTest(
+const generalLimiter = skipInDevAndTest(
   rateLimit({
     windowMs: rateLimits.general.windowMs,
     max: rateLimits.general.max,
@@ -35,7 +37,7 @@ const generalLimiter = skipInTest(
  * Auth route rate limiter — 5 requests per 15 minutes.
  * Applies to login and similar sensitive endpoints.
  */
-const authLimiter = skipInTest(
+const authLimiter = skipInDevAndTest(
   rateLimit({
     windowMs: rateLimits.auth.windowMs,
     max: rateLimits.auth.max,
@@ -51,7 +53,7 @@ const authLimiter = skipInTest(
 /**
  * Registration rate limiter — 3 requests per hour.
  */
-const registerLimiter = skipInTest(
+const registerLimiter = skipInDevAndTest(
   rateLimit({
     windowMs: rateLimits.register.windowMs,
     max: rateLimits.register.max,
@@ -67,7 +69,7 @@ const registerLimiter = skipInTest(
 /**
  * Forgot password rate limiter — 3 requests per hour.
  */
-const forgotPasswordLimiter = skipInTest(
+const forgotPasswordLimiter = skipInDevAndTest(
   rateLimit({
     windowMs: rateLimits.forgotPassword.windowMs,
     max: rateLimits.forgotPassword.max,
@@ -83,7 +85,7 @@ const forgotPasswordLimiter = skipInTest(
 /**
  * Email verification rate limiter — 5 requests per hour.
  */
-const emailVerificationLimiter = skipInTest(
+const emailVerificationLimiter = skipInDevAndTest(
   rateLimit({
     windowMs: rateLimits.emailVerification.windowMs,
     max: rateLimits.emailVerification.max,

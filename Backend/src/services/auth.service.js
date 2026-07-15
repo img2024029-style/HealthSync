@@ -375,11 +375,13 @@ const refresh = async (refreshTokenRaw, ip, userAgent) => {
     throw ApiError.unauthorized(MESSAGES.INVALID_TOKEN);
   }
 
-  // REUSE DETECTION
-  if (tokenDoc.isUsed) {
-    logger.warn('SECURITY: Refresh token reuse detected! Revoking token family.', {
+  // REUSE & COMPROMISE DETECTION
+  if (tokenDoc.isUsed || tokenDoc.isRevoked) {
+    logger.warn('SECURITY: Suspicious refresh token presented! Revoking token family.', {
       userId: tokenDoc.userId,
       family: tokenDoc.family,
+      isUsed: tokenDoc.isUsed,
+      isRevoked: tokenDoc.isRevoked,
       ip,
       userAgent,
     });
@@ -446,18 +448,24 @@ const refresh = async (refreshTokenRaw, ip, userAgent) => {
 /**
  * Logout.
  */
-const logout = async (userId, ip, userAgent) => {
-  await tokenService.deleteAllRefreshTokens(userId);
+const logout = async (userId, refreshTokenRaw, ip, userAgent) => {
+  const action = refreshTokenRaw ? 'LOGOUT' : 'LOGOUT_ALL';
+
+  if (refreshTokenRaw) {
+    await tokenService.deleteRefreshToken(refreshTokenRaw);
+  } else {
+    await tokenService.deleteAllRefreshTokens(userId);
+  }
 
   auditService.logAuthEvent({
     userId,
-    action: 'LOGOUT',
+    action,
     ip,
     userAgent,
     success: true,
   });
 
-  logger.info('User logged out', { userId, ip });
+  logger.info(action === 'LOGOUT' ? 'User logged out' : 'User logged out of all devices', { userId, ip });
 
   return { message: MESSAGES.LOGOUT_SUCCESS };
 };
