@@ -1,71 +1,96 @@
-/**
- * Structured logger utility.
- *
- * Provides consistent, structured logging across the application.
- * In development: uses Morgan for HTTP request logging + colored console output.
- * In production: structured JSON output (ready for log aggregation).
- *
- * Usage:
- *   const logger = require('./logger');
- *   logger.info('User registered', { userId, email });
- *   logger.warn('Rate limit approaching', { ip, count });
- *   logger.error('Database write failed', { error: err.message });
- */
+const winston = require('winston');
 const morgan = require('morgan');
-
-// ─── Log Level Colors (dev only) ─────────────────────
-const COLORS = {
-  info: '\x1b[36m',    // cyan
-  warn: '\x1b[33m',    // yellow
-  error: '\x1b[31m',   // red
-  debug: '\x1b[90m',   // gray
-  reset: '\x1b[0m',
-};
 
 const isDev = () => process.env.NODE_ENV === 'development';
 
-/**
- * Format a log entry.
- * Dev:  [INFO] 2026-07-14T12:30:00Z — User registered { userId: "..." }
- * Prod: {"level":"info","message":"User registered","userId":"...","timestamp":"..."}
- */
-const formatLog = (level, message, meta = {}) => {
-  const timestamp = new Date().toISOString();
-
-  if (isDev()) {
-    const color = COLORS[level] || COLORS.reset;
-    const metaStr = Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : '';
-    return `${color}[${level.toUpperCase()}]${COLORS.reset} ${timestamp} — ${message}${metaStr}`;
-  }
-
-  // Production: structured JSON (one line per log — ideal for ELK/CloudWatch/Datadog)
-  return JSON.stringify({
-    level,
-    message,
-    ...meta,
-    timestamp,
-  });
-};
-
-const logger = {
-  info: (message, meta) => console.log(formatLog('info', message, meta)),
-  warn: (message, meta) => console.warn(formatLog('warn', message, meta)),
-  error: (message, meta) => console.error(formatLog('error', message, meta)),
-  debug: (message, meta) => {
-    if (isDev()) console.debug(formatLog('debug', message, meta));
+const customLevels = {
+  levels: {
+    error: 0,
+    warn: 1,
+    info: 2,
+    http: 3,
+    debug: 4,
+  },
+  colors: {
+    error: 'red',
+    warn: 'yellow',
+    info: 'cyan',
+    http: 'magenta',
+    debug: 'gray',
   },
 };
 
+winston.addColors(customLevels.colors);
+
+// Formatting for development console logs
+const devFormat = winston.format.combine(
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  winston.format.printf(({ timestamp, level, message, label, reqId, ...meta }) => {
+    const reqIdStr = reqId ? ` [reqId=${reqId}]` : '';
+    const labelStr = label ? ` [${label}]` : '';
+    const metaStr = Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : '';
+    
+    // Manual colorizing for level to avoid color codes mess in text
+    let color = '';
+    if (level.includes('error')) color = '\x1b[31m';
+    else if (level.includes('warn')) color = '\x1b[33m';
+    else if (level.includes('info')) color = '\x1b[36m';
+    else if (level.includes('http')) color = '\x1b[35m';
+    else if (level.includes('debug')) color = '\x1b[90m';
+    const reset = '\x1b[0m';
+
+    return `${color}[${level.toUpperCase()}]${reset} ${timestamp}${labelStr}${reqIdStr} — ${message}${metaStr}`;
+  })
+);
+
+// Formatting for production json logs
+const prodFormat = winston.format.combine(
+  winston.format.timestamp(),
+  winston.format.json()
+);
+
+const transports = [
+  new winston.transports.Console({
+    format: isDev() ? devFormat : prodFormat,
+  }),
+];
+
+// Add file logging in non-development/non-test environments
+if (!isDev() && process.env.NODE_ENV !== 'test') {
+  transports.push(
+    new winston.transports.File({ filename: 'logs/error.log', level: 'error', format: prodFormat }),
+    new winston.transports.File({ filename: 'logs/combined.log', format: prodFormat })
+  );
+}
+
+const logger = winston.createLogger({
+  level: isDev() ? 'debug' : 'info',
+  levels: customLevels.levels,
+  transports,
+});
+
 /**
- * Setup Morgan HTTP request logger middleware.
- * Only active in development.
+ * Setup Morgan HTTP request logger middleware integrated with Winston stream.
  */
 const setupHttpLogger = (app) => {
+  const morganStream = {
+    write: (message) => {
+      logger.log('http', message.trim());
+    },
+  };
+
   if (isDev()) {
-    app.use(morgan('dev'));
+    app.use(morgan('dev', { stream: morganStream }));
+  } else {
+    // Combined format for production to capture details in JSON logger
+    app.use(
+      morgan(
+        ':remote-addr - :remote-user [:date[clf]] ":method :url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"',
+        { stream: morganStream }
+      )
+    );
   }
 };
 
-// Export both the logger and the HTTP middleware setup
 module.exports = logger;
 module.exports.setupHttpLogger = setupHttpLogger;

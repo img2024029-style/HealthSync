@@ -1,27 +1,32 @@
 /**
  * Audit service.
  * Logs security-sensitive events for healthcare compliance.
- * Non-blocking — errors are caught silently to avoid failing user requests.
+ * Parses user agent into structured browser and device records.
  */
 const AuditLog = require('../models/AuditLog');
+const UAParser = require('ua-parser-js');
 
 /**
- * Log an authentication event.
- * @param {Object} params
- * @param {string} params.userId    - User's MongoDB _id (null for failed attempts with unknown user)
- * @param {string} params.action    - Action name (e.g. 'LOGIN', 'LOGOUT')
- * @param {string} params.ip        - Client IP address
- * @param {string} params.userAgent - Client user agent
- * @param {boolean} params.success  - Whether the action succeeded
- * @param {Object} params.metadata  - Additional data (optional)
+ * Log an authentication/security event.
  */
 const logAuthEvent = async ({ userId, action, ip, userAgent, success = true, metadata = {} }) => {
   try {
+    let browser = 'Unknown';
+    let device = 'Desktop';
+    if (userAgent) {
+      const parser = new UAParser(userAgent);
+      const result = parser.getResult();
+      browser = result.browser.name ? `${result.browser.name} ${result.browser.version || ''}`.trim() : 'Unknown';
+      device = result.device.type ? result.device.type : 'Desktop';
+    }
+
     await AuditLog.create({
       userId: userId || null,
       action,
       ip: ip || null,
-      userAgent: userAgent || null,
+      browser,
+      device,
+      location: 'Unknown', // Geo-IP mapping can be added here in the future
       success,
       metadata,
     });

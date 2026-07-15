@@ -1,6 +1,5 @@
 /**
  * Auth controller.
- * Thin layer — delegates all logic to auth.service.js.
  * Handles HTTP concerns: request parsing, cookies, response status codes.
  */
 const authService = require('../services/auth.service');
@@ -59,7 +58,6 @@ const registerHospital = asyncHandler(async (req, res) => {
 
 /**
  * POST /api/auth/login
- * `role` in the body selects 'user' (patient, default) or 'hospital'.
  */
 const login = asyncHandler(async (req, res) => {
   const { email, password, role } = req.body;
@@ -98,6 +96,22 @@ const logout = asyncHandler(async (req, res) => {
 });
 
 /**
+ * POST /api/auth/logout/all
+ */
+const logoutAll = asyncHandler(async (req, res) => {
+  const ip = req.ip;
+  const userAgent = req.headers['user-agent'];
+
+  // Delete all refresh tokens for the user
+  await authService.logout(req.user.id, ip, userAgent);
+
+  res.clearCookie(REFRESH_TOKEN_COOKIE_NAME, getClearCookieOptions());
+
+  const response = ApiResponse.ok(null, 'Logged out from all devices successfully.');
+  res.status(response.statusCode).json(response);
+});
+
+/**
  * POST /api/auth/refresh
  */
 const refresh = asyncHandler(async (req, res) => {
@@ -127,11 +141,97 @@ const getMe = asyncHandler(async (req, res) => {
   res.status(response.statusCode).json(response);
 });
 
+/**
+ * POST /api/auth/verify-email
+ */
+const verifyEmail = asyncHandler(async (req, res) => {
+  const { token } = req.body;
+  const ip = req.ip;
+  const userAgent = req.headers['user-agent'];
+
+  const result = await authService.verifyEmail(token, ip, userAgent);
+
+  const response = ApiResponse.ok(null, result.message);
+  res.status(response.statusCode).json(response);
+});
+
+/**
+ * POST /api/auth/resend-verification
+ */
+const resendVerification = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  const ip = req.ip;
+  const userAgent = req.headers['user-agent'];
+
+  const result = await authService.resendVerification(email, ip, userAgent);
+
+  const response = ApiResponse.ok(null, result.message);
+  res.status(response.statusCode).json(response);
+});
+
+/**
+ * POST /api/auth/forgot-password
+ */
+const forgotPassword = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  const ip = req.ip;
+  const userAgent = req.headers['user-agent'];
+
+  const result = await authService.forgotPassword(email, ip, userAgent);
+
+  const response = ApiResponse.ok(null, result.message);
+  res.status(response.statusCode).json(response);
+});
+
+/**
+ * POST /api/auth/reset-password
+ */
+const resetPassword = asyncHandler(async (req, res) => {
+  const { token, password } = req.body;
+  const ip = req.ip;
+  const userAgent = req.headers['user-agent'];
+
+  const result = await authService.resetPassword(token, password, ip, userAgent);
+
+  const response = ApiResponse.ok(null, result.message);
+  res.status(response.statusCode).json(response);
+});
+
+/**
+ * POST /api/auth/change-password
+ */
+const changePassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const ip = req.ip;
+  const userAgent = req.headers['user-agent'];
+
+  const result = await authService.changePassword(
+    req.user.id,
+    req.user.role,
+    currentPassword,
+    newPassword,
+    ip,
+    userAgent
+  );
+
+  // Clear cookie because password change revokes all sessions
+  res.clearCookie(REFRESH_TOKEN_COOKIE_NAME, getClearCookieOptions());
+
+  const response = ApiResponse.ok(null, result.message);
+  res.status(response.statusCode).json(response);
+});
+
 module.exports = {
   register,
   registerHospital,
   login,
   logout,
+  logoutAll,
   refresh,
   getMe,
+  verifyEmail,
+  resendVerification,
+  forgotPassword,
+  resetPassword,
+  changePassword,
 };

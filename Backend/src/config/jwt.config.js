@@ -23,12 +23,20 @@ module.exports = {
       max: 100,
     },
     auth: {
-      windowMs: 15 * 60 * 1000,   // 15 minutes
+      windowMs: 15 * 60 * 1000,   // 15 minutes (login)
       max: 5,
     },
     register: {
       windowMs: 60 * 60 * 1000,   // 1 hour
       max: 3,
+    },
+    forgotPassword: {
+      windowMs: 60 * 60 * 1000,   // 1 hour
+      max: 3,
+    },
+    emailVerification: {
+      windowMs: 60 * 60 * 1000,   // 1 hour
+      max: 5,
     },
   },
 };

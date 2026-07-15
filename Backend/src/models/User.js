@@ -48,13 +48,49 @@ const userSchema = new mongoose.Schema(
     },
 
     // ─── Email Verification ──────────────────────────
-    // Verification/reset-token fields removed: the verify-email and
-    // forgot/reset-password endpoints were unused (no SMTP configured,
-    // no frontend calling them) and have been removed. isVerified is
-    // still set to true directly on registration and checked at login.
     isVerified: {
       type: Boolean,
       default: false,
+    },
+    verificationToken: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    verificationExpiry: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+
+    // ─── Account Recovery ────────────────────────────
+    resetPasswordToken: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    resetPasswordExpiry: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+
+    // ─── Account Security & Auditing ─────────────────
+    passwordChangedAt: {
+      type: Date,
+      default: null,
+    },
+    lastLogin: {
+      type: Date,
+      default: null,
+    },
+    lastLoginIP: {
+      type: String,
+      default: null,
+    },
+    lastLoginDevice: {
+      type: String,
+      default: null,
     },
 
     // ─── Account Lockout ─────────────────────────────

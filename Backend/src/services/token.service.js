@@ -33,11 +33,11 @@ const generateAccessToken = (userId, role) => {
 
 /**
  * Generate a cryptographically secure refresh token (raw string).
- * 40 bytes = 80 hex chars = ~2^320 combinations (infeasible to brute-force).
+ * 32 bytes = 256 bits = 64 hex characters.
  * @returns {string} Random hex string
  */
 const generateRefreshToken = () => {
-  return crypto.randomBytes(40).toString('hex');
+  return crypto.randomBytes(32).toString('hex');
 };
 
 /**
