@@ -1,26 +1,18 @@
-/**
- * Centralized message constants.
- * Avoids magic strings across controllers and services.
- */
 const MESSAGES = Object.freeze({
   // ─── Auth ────────────────────────────────────────
-  // NOTE: email verification is temporarily bypassed (see auth.service.js) —
-  // accounts are auto-verified on registration until SMTP is configured.
-  REGISTER_SUCCESS: 'Registration successful.',
-  HOSPITAL_REGISTER_SUCCESS: 'Hospital registered successfully.',
+  REGISTER_SUCCESS: 'Registration successful. Please verify your email.',
   LOGIN_SUCCESS: 'Login successful.',
   LOGOUT_SUCCESS: 'Logged out successfully.',
   REFRESH_SUCCESS: 'Token refreshed successfully.',
+  EMAIL_VERIFIED: 'Email verified successfully.',
+  PASSWORD_RESET_SENT: 'Password reset link sent to your email.',
+  PASSWORD_RESET_SUCCESS: 'Password reset successful. Please login with your new password.',
 
   // ─── Errors ──────────────────────────────────────
   INVALID_CREDENTIALS: 'Invalid email or password.',
   USER_NOT_FOUND: 'User not found.',
   USER_ALREADY_EXISTS: 'A user with this email already exists.',
   MOBILE_ALREADY_EXISTS: 'A user with this mobile number already exists.',
-  HOSPITAL_NOT_FOUND: 'Hospital not found.',
-  HOSPITAL_ALREADY_EXISTS: 'A hospital with this email already exists.',
-  HOSPITAL_MOBILE_ALREADY_EXISTS: 'A hospital with this mobile number already exists.',
-  REGISTRATION_NUMBER_ALREADY_EXISTS: 'A hospital with this registration number already exists.',
   EMAIL_NOT_VERIFIED: 'Please verify your email before logging in.',
   ACCOUNT_LOCKED: 'Account temporarily locked due to too many failed login attempts. Please try again later.',
   INVALID_TOKEN: 'Invalid or expired token.',

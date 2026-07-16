@@ -1,6 +1,4 @@
-/**
- * Token type constants.
- */
+
 const TOKEN_TYPES = Object.freeze({
   ACCESS: 'access',
   REFRESH: 'refresh',
