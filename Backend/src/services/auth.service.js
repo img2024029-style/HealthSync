@@ -19,6 +19,13 @@ const hashToken = (token) => {
   return crypto.createHash('sha256').update(token).digest('hex');
 };
 
+// Email verification is enforced when SMTP is configured, and always under
+// NODE_ENV=test (the test suite exercises the full verification flow).
+// Otherwise (dev without SMTP) accounts are auto-verified, since no
+// verification email can actually be delivered.
+const isVerificationEnforced = () =>
+  emailService.isEmailConfigured() || process.env.NODE_ENV === 'test';
+
 // Helper to parse device from user agent
 const parseDevice = (userAgent) => {
   if (!userAgent) return 'Unknown';
@@ -45,24 +52,30 @@ const register = async (userData, ip, userAgent) => {
     throw ApiError.conflict(MESSAGES.MOBILE_ALREADY_EXISTS);
   }
 
+  const emailEnabled = isVerificationEnforced();
+
   // Generate Email Verification Token
   const rawVerificationToken = crypto.randomBytes(32).toString('hex');
   const hashedVerificationToken = hashToken(rawVerificationToken);
   const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
-  // Create user (unverified initially)
+  // Create user (unverified initially when email is enabled)
   const user = await User.create({
     fullName: { firstName, lastName },
     email,
     mobileNumber,
     password,
-    isVerified: false,
-    verificationToken: hashedVerificationToken,
-    verificationExpiry,
+    isVerified: !emailEnabled,
+    verificationToken: emailEnabled ? hashedVerificationToken : null,
+    verificationExpiry: emailEnabled ? verificationExpiry : null,
   });
 
-  // Send email (non-blocking)
-  emailService.sendVerificationEmail(email, rawVerificationToken);
+  if (emailEnabled) {
+    // Send email (non-blocking)
+    emailService.sendVerificationEmail(email, rawVerificationToken);
+  } else {
+    logger.warn('SMTP not configured — account auto-verified (dev mode)', { email });
+  }
 
   // Audit log
   auditService.logAuthEvent({
@@ -114,6 +127,8 @@ const registerHospital = async (hospitalData, ip, userAgent) => {
     throw ApiError.conflict(MESSAGES.REGISTRATION_NUMBER_ALREADY_EXISTS);
   }
 
+  const emailEnabled = isVerificationEnforced();
+
   // Generate Email Verification Token
   const rawVerificationToken = crypto.randomBytes(32).toString('hex');
   const hashedVerificationToken = hashToken(rawVerificationToken);
@@ -127,13 +142,17 @@ const registerHospital = async (hospitalData, ip, userAgent) => {
     registrationNumber,
     hospitalType,
     address: { street, city, state, pincode, country },
-    isVerified: false,
-    verificationToken: hashedVerificationToken,
-    verificationExpiry,
+    isVerified: !emailEnabled,
+    verificationToken: emailEnabled ? hashedVerificationToken : null,
+    verificationExpiry: emailEnabled ? verificationExpiry : null,
   });
 
-  // Send email (non-blocking)
-  emailService.sendVerificationEmail(email, rawVerificationToken);
+  if (emailEnabled) {
+    // Send email (non-blocking)
+    emailService.sendVerificationEmail(email, rawVerificationToken);
+  } else {
+    logger.warn('SMTP not configured — hospital auto-verified (dev mode)', { email });
+  }
 
   auditService.logAuthEvent({
     userId: hospital._id,
@@ -206,8 +225,9 @@ const loginPatient = async (email, password, ip, userAgent) => {
     throw ApiError.unauthorized(MESSAGES.INVALID_CREDENTIALS);
   }
 
-  // Enforce email verification check
-  if (!user.isVerified) {
+  // Enforce email verification check (skipped in dev mode when SMTP is not
+  // configured, since verification emails can't be delivered).
+  if (!user.isVerified && isVerificationEnforced()) {
     auditService.logAuthEvent({
       userId: user._id,
       action: 'LOGIN_FAILED',
@@ -306,8 +326,9 @@ const loginHospital = async (email, password, ip, userAgent) => {
     throw ApiError.forbidden('This hospital account has been deactivated.');
   }
 
-  // Enforce email verification check
-  if (!hospital.isVerified) {
+  // Enforce email verification check (skipped in dev mode when SMTP is not
+  // configured, since verification emails can't be delivered).
+  if (!hospital.isVerified && isVerificationEnforced()) {
     auditService.logAuthEvent({
       userId: hospital._id,
       action: 'LOGIN_FAILED',

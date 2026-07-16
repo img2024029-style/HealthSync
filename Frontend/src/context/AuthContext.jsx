@@ -74,18 +74,15 @@ export function AuthProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Registration doesn't issue tokens by itself (Backend/src/services/auth.service.js
-  // register() only creates the account) — log in immediately afterwards with
-  // the same credentials so signup still feels like a single step.
-  const registerPatient = async (payload) => {
-    await authApi.registerPatient(payload);
-    return login({ email: payload.email, password: payload.password, appRole: "patient" });
-  };
+  // Registration only creates the account (Backend/src/services/auth.service.js
+  // register() does not issue tokens) — we deliberately do NOT log the user in
+  // afterwards. The signup page sends them to /login instead, so they land on
+  // a clean, explicit sign-in step (and so email verification, if enforced,
+  // is handled by the normal login flow rather than being masked behind an
+  // auto-login attempt).
+  const registerPatient = (payload) => authApi.registerPatient(payload);
 
-  const registerHospital = async (payload) => {
-    await authApi.registerHospital(payload);
-    return login({ email: payload.email, password: payload.password, appRole: "hospital" });
-  };
+  const registerHospital = (payload) => authApi.registerHospital(payload);
 
   const login = async ({ email, password, appRole }) => {
     const data = await authApi.login({ email, password, role: toApiRole(appRole) });

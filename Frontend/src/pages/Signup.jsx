@@ -60,7 +60,6 @@ export default function Signup() {
           mobileNumber: form.mobileNumber,
           password: form.password,
         });
-        navigate("/dashboard/patient");
       } else {
         await registerHospital({
           name: form.hospitalName,
@@ -74,8 +73,10 @@ export default function Signup() {
           mobileNumber: form.mobileNumber,
           password: form.password,
         });
-        navigate("/dashboard/hospital");
       }
+      // Account created — send the user to log in explicitly rather than
+      // signing them in automatically. Login.jsx shows the success popup.
+      navigate(`/login?role=${role}&signupSuccess=1`, { replace: true });
     } catch (err) {
       setError(err.message || "Something went wrong. Please try again.");
     } finally {

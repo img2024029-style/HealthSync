@@ -51,6 +51,8 @@ export const authApi = {
   registerHospital: (payload) => request("/auth/register/hospital", { method: "POST", body: payload }),
   // `role` must be 'user' (patient) or 'hospital'.
   login: (payload) => request("/auth/login", { method: "POST", body: payload }),
+  verifyEmail: (token) => request("/auth/verify-email", { method: "POST", body: { token } }),
+  resendVerification: (email) => request("/auth/resend-verification", { method: "POST", body: { email } }),
   refresh: () => request("/auth/refresh", { method: "POST" }),
   logout: (token) => request("/auth/logout", { method: "POST", token }),
   me: (token) => request("/auth/me", { token }),

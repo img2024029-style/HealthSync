@@ -21,6 +21,13 @@ if (
 }
 
 /**
+ * Whether real SMTP credentials are configured.
+ * When false, the app runs in "dev mode": emails are logged to the console
+ * and email verification is bypassed (accounts are auto-verified).
+ */
+const isEmailConfigured = () => transporter !== null;
+
+/**
  * Sends email. Falls back to console log if SMTP is not configured.
  */
 const sendEmail = async ({ to, subject, text, html }) => {
@@ -84,6 +91,7 @@ const sendPasswordResetEmail = async (email, token) => {
 };
 
 module.exports = {
+  isEmailConfigured,
   sendEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,

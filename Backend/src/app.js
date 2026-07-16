@@ -40,7 +40,7 @@ const routes = require('./routes');
 
 const app = express();
 
-// ─── 0. Request ID (Must be first for tracing) ───────────────
+// ─── 0. Request ID (Must be first for tracing) ───────────────  ??
 app.use(requestId);
 
 // ─── 1. CORS ─────────────────────────────────────────────────
@@ -67,12 +67,12 @@ app.use(compression());
 
 // ─── 5. Body Parsers ────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));  //what is url encoded used for
 
 // ─── 6. Cookie Parser ──────────────────────────────────────
 app.use(cookieParser());
 
-// ─── 7. General Rate Limiter ────────────────────────────────
+// ─── 7. General Rate Limiter ────────────────────────────────  ??
 app.use(generalLimiter);
 
 // ─── 8. Health Check ────────────────────────────────────────

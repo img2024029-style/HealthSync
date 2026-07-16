@@ -5,7 +5,7 @@ import { HeartPulse, User, Building2 } from "lucide-react";
  * Shared shell for Login / Signup pages:
  * brand header, card, and the Patient | Hospital role toggle.
  */
-export default function AuthLayout({ title, subtitle, role, onRoleChange, children }) {
+export default function AuthLayout({ title, subtitle, role, onRoleChange, showRoleToggle = true, children }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(ellipse_at_top,_#eef7ff_0%,_#ffffff_55%)] px-4 py-10">
       <div className="w-full max-w-md">
@@ -26,26 +26,28 @@ export default function AuthLayout({ title, subtitle, role, onRoleChange, childr
           <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
 
           {/* Role toggle */}
-          <div className="mt-6 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
-            {[
-              { key: "patient", label: "Patient", Icon: User },
-              { key: "hospital", label: "Hospital", Icon: Building2 },
-            ].map(({ key, label, Icon }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => onRoleChange(key)}
-                className={`flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
-                  role === key
-                    ? "bg-white text-brand-700 shadow-sm"
-                    : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                <Icon size={16} />
-                {label}
-              </button>
-            ))}
-          </div>
+          {showRoleToggle && (
+            <div className="mt-6 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+              {[
+                { key: "patient", label: "Patient", Icon: User },
+                { key: "hospital", label: "Hospital", Icon: Building2 },
+              ].map(({ key, label, Icon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => onRoleChange(key)}
+                  className={`flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
+                    role === key
+                      ? "bg-white text-brand-700 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  <Icon size={16} />
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {children}
         </div>
