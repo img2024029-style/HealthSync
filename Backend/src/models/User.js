@@ -132,9 +132,9 @@ userSchema.methods.isLocked = function () {
   return !!(this.lockUntil && this.lockUntil > Date.now());
 };
 
-/**
- * Increment login attempts. Lock account after max attempts.
- */
+/*
+ Increment login attempts. Lock account after max attempts.
+*/
 userSchema.methods.incrementLoginAttempts = async function () {
   // If previous lock has expired, reset attempts
   if (this.lockUntil && this.lockUntil < Date.now()) {
@@ -143,9 +143,7 @@ userSchema.methods.incrementLoginAttempts = async function () {
       $unset: { lockUntil: 1 },
     });
   }
-
   const updates = { $inc: { loginAttempts: 1 } };
-
   // Lock account if we've reached max attempts
   if (this.loginAttempts + 1 >= maxLoginAttempts) {
     updates.$set = { lockUntil: new Date(Date.now() + lockDurationMs) };

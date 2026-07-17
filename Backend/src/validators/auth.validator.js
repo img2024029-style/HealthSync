@@ -113,8 +113,8 @@ const loginValidator = [
   body('role')
     .optional()
     .trim()
-    .isIn(['user', 'hospital'])
-    .withMessage("Role must be 'user' or 'hospital'."),
+    .isIn(['user', 'hospital', 'admin'])
+    .withMessage("Role must be 'user', 'hospital', or 'admin'."),
 ];
 
 /**

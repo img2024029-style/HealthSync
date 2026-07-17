@@ -18,6 +18,9 @@ export default function ProtectedRoute({ role, children }) {
   }
 
   if (!isAuthenticated) {
+    if (role === "admin") {
+      return <Navigate to="/admin/login" replace />;
+    }
     return <Navigate to={`/login${role ? `?role=${role}` : ""}`} replace />;
   }
 

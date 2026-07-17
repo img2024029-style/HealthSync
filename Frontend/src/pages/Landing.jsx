@@ -191,6 +191,19 @@ export default function Landing() {
             <HeartPulse size={14} className="text-brand-500" />
             Built for better care.
           </p>
+          {/*
+            Intentionally low-key: administrators know to look for this, but
+            it isn't pitched as a primary action alongside "Log in" / "Sign up"
+            in the nav. Keeping privileged entry points off the main CTAs
+            reduces how easy the admin surface is to find and target, without
+            hiding it from the people who actually need it.
+          */}
+          <Link
+            to="/admin/login"
+            className="text-xs text-slate-300 transition hover:text-slate-500"
+          >
+            Admin login
+          </Link>
         </div>
       </footer>
     </div>

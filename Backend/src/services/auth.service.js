@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const UAParser = require('ua-parser-js');
 const User = require('../models/User');
 const Hospital = require('../models/Hospital');
+const Admin = require('../models/Admin');
 const tokenService = require('./token.service');
 const auditService = require('./audit.service');
 const emailService = require('./email.service');
@@ -372,11 +373,110 @@ const loginHospital = async (email, password, ip, userAgent) => {
 };
 
 /**
+ * Login an admin (Admin collection).
+ *
+ * Admin accounts are provisioned out-of-band (scripts/seedAdmin.js) — there's
+ * no self-registration endpoint, so this only ever authenticates against
+ * pre-existing accounts. Deliberately reuses the same lockout/audit pattern
+ * as patient/hospital login so admin access isn't held to a lower bar.
+ */
+const loginAdmin = async (email, password, ip, userAgent) => {
+  const admin = await Admin.findOne({ email }).select('+password +loginAttempts +lockUntil');
+
+  // Same INVALID_CREDENTIALS message whether the account doesn't exist or the
+  // password is wrong — avoids leaking which admin emails are valid.
+  if (!admin) {
+    throw ApiError.unauthorized(MESSAGES.INVALID_CREDENTIALS);
+  }
+
+  if (admin.isLocked()) {
+    auditService.logAuthEvent({
+      userId: admin._id,
+      action: 'LOGIN_FAILED',
+      ip,
+      userAgent,
+      success: false,
+      metadata: { reason: 'account_locked', role: ROLES.ADMIN },
+    });
+    throw ApiError.forbidden(MESSAGES.ACCOUNT_LOCKED);
+  }
+
+  const isMatch = await admin.comparePassword(password);
+
+  if (!isMatch) {
+    await admin.incrementLoginAttempts();
+
+    const updatedAdmin = await Admin.findById(admin._id).select('+loginAttempts +lockUntil');
+    if (updatedAdmin.isLocked()) {
+      auditService.logAuthEvent({
+        userId: admin._id,
+        action: 'ACCOUNT_LOCKED',
+        ip,
+        userAgent,
+        success: false,
+        metadata: { loginAttempts: updatedAdmin.loginAttempts, role: ROLES.ADMIN },
+      });
+      logger.warn('Admin account locked due to failed attempts', { adminId: admin._id, ip });
+    }
+
+    auditService.logAuthEvent({
+      userId: admin._id,
+      action: 'LOGIN_FAILED',
+      ip,
+      userAgent,
+      success: false,
+      metadata: { reason: 'invalid_password', role: ROLES.ADMIN },
+    });
+
+    throw ApiError.unauthorized(MESSAGES.INVALID_CREDENTIALS);
+  }
+
+  if (admin.isActive === false) {
+    throw ApiError.forbidden('This admin account has been deactivated.');
+  }
+
+  admin.loginAttempts = 0;
+  admin.lockUntil = null;
+  admin.lastLogin = new Date();
+  admin.lastLoginIP = ip || null;
+  admin.lastLoginDevice = parseDevice(userAgent);
+  await admin.save();
+
+  // Preserve 'admin' vs 'superadmin' in the token so future authorization
+  // middleware can distinguish them; both satisfy role === ROLES.ADMIN checks
+  // that only look for "is this an admin session".
+  const accessToken = tokenService.generateAccessToken(admin._id, admin.role);
+  const refreshTokenRaw = tokenService.generateRefreshToken();
+
+  await tokenService.saveRefreshToken(admin._id, refreshTokenRaw, ip, userAgent);
+
+  auditService.logAuthEvent({
+    userId: admin._id,
+    action: 'LOGIN',
+    ip,
+    userAgent,
+    success: true,
+    metadata: { role: admin.role },
+  });
+
+  logger.info('Admin logged in', { adminId: admin._id, ip });
+
+  return {
+    user: admin.toJSON(),
+    accessToken,
+    refreshToken: refreshTokenRaw,
+  };
+};
+
+/**
  * Login dispatcher.
  */
 const login = async (email, password, role, ip, userAgent) => {
   if (role === ROLES.HOSPITAL) {
     return loginHospital(email, password, ip, userAgent);
+  }
+  if (role === ROLES.ADMIN) {
+    return loginAdmin(email, password, ip, userAgent);
   }
   return loginPatient(email, password, ip, userAgent);
 };
@@ -439,6 +539,11 @@ const refresh = async (refreshTokenRaw, ip, userAgent) => {
   }
 
   if (!account) {
+    account = await Admin.findById(userId);
+    role = account ? account.role : null; // preserves 'admin' vs 'superadmin'
+  }
+
+  if (!account) {
     const RefreshToken = require('../models/RefreshToken');
     await RefreshToken.deleteToken(tokenDoc._id);
     throw ApiError.unauthorized(MESSAGES.USER_NOT_FOUND);
@@ -495,7 +600,10 @@ const logout = async (userId, refreshTokenRaw, ip, userAgent) => {
  * Get current user profile.
  */
 const getCurrentUser = async (userId, role) => {
-  const Model = role === ROLES.HOSPITAL ? Hospital : User;
+  let Model = User;
+  if (role === ROLES.HOSPITAL) Model = Hospital;
+  else if (role === ROLES.ADMIN || role === 'superadmin') Model = Admin;
+
   const account = await Model.findById(userId);
 
   if (!account) {
@@ -674,7 +782,10 @@ const resetPassword = async (token, newPassword, ip, userAgent) => {
  * Change Password (Authenticated).
  */
 const changePassword = async (userId, role, currentPassword, newPassword, ip, userAgent) => {
-  const Model = role === ROLES.HOSPITAL ? Hospital : User;
+  let Model = User;
+  if (role === ROLES.HOSPITAL) Model = Hospital;
+  else if (role === ROLES.ADMIN || role === 'superadmin') Model = Admin;
+
   const account = await Model.findById(userId).select('+password');
 
   if (!account) {

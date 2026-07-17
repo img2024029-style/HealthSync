@@ -5,11 +5,21 @@ const AuthContext = createContext(null);
 
 const STORAGE_KEY = "healthsync_auth";
 
-// The UI/routes use 'patient' | 'hospital'. The backend (Backend/src/constants/roles.js)
-// uses 'user' | 'hospital'. Translate at the API boundary so the rest of the
-// app can keep using the friendlier 'patient' term.
-const toApiRole = (appRole) => (appRole === "hospital" ? "hospital" : "user");
-const toAppRole = (apiRole) => (apiRole === "hospital" ? "hospital" : "patient");
+// The UI/routes use 'patient' | 'hospital' | 'admin'. The backend
+// (Backend/src/constants/roles.js) uses 'user' | 'hospital' | 'admin', and
+// Admin documents may additionally carry 'superadmin'. Translate at the API
+// boundary so the rest of the app can keep using the friendlier 'patient'
+// term and doesn't need to know about the admin/superadmin distinction.
+const toApiRole = (appRole) => {
+  if (appRole === "hospital") return "hospital";
+  if (appRole === "admin") return "admin";
+  return "user";
+};
+const toAppRole = (apiRole) => {
+  if (apiRole === "hospital") return "hospital";
+  if (apiRole === "admin" || apiRole === "superadmin") return "admin";
+  return "patient";
+};
 
 function readStoredAuth() {
   try {
