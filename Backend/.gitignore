@@ -29,3 +29,6 @@ dist/
 build/
 
 mongodb_data/
+
+# Uploads (user-generated content)
+uploads/

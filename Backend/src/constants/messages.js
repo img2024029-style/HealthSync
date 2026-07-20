@@ -31,6 +31,19 @@ const MESSAGES = Object.freeze({
   SERVER_ERROR: 'Something went wrong. Please try again later.',
   NOT_FOUND: 'The requested resource was not found.',
   TOO_MANY_REQUESTS: 'Too many requests. Please try again later.',
+
+  // ─── Patient Profile ─────────────────────────────
+  PROFILE_UPDATED: 'Profile updated successfully.',
+  PROFILE_NOT_FOUND: 'Patient profile not found.',
+  PROFILE_PICTURE_UPLOADED: 'Profile picture uploaded successfully.',
+  PROFILE_PICTURE_DELETED: 'Profile picture deleted successfully.',
+
+  // ─── Hospital ────────────────────────────────────
+  HOSPITAL_ALREADY_EXISTS: 'A hospital with this email already exists.',
+  HOSPITAL_MOBILE_ALREADY_EXISTS: 'A hospital with this mobile number already exists.',
+  REGISTRATION_NUMBER_ALREADY_EXISTS: 'A hospital with this registration number already exists.',
+  HOSPITAL_REGISTER_SUCCESS: 'Hospital registration successful. Please verify your email.',
+  HOSPITAL_NOT_FOUND: 'Hospital not found.',
 });
 
 module.exports = MESSAGES;

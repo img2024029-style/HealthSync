@@ -1,3 +1,4 @@
+process.env.NODE_ENV = 'test';
 require('dotenv').config();
 const request = require('supertest');
 const mongoose = require('mongoose');

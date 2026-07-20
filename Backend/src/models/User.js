@@ -47,6 +47,47 @@ const userSchema = new mongoose.Schema(
       default: 'user',
     },
 
+    // ─── Patient Profile Fields ─────────────────────
+    dob: {
+      type: Date,
+      default: null,
+    },
+    gender: {
+      type: String,
+      enum: ['male', 'female', 'other'],
+      default: null,
+    },
+    bloodGroup: {
+      type: String,
+      enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'],
+      default: null,
+    },
+    address: {
+      street: { type: String, trim: true, default: null },
+      city: { type: String, trim: true, default: null },
+      state: { type: String, trim: true, default: null },
+      pincode: {
+        type: String,
+        match: [/^\d{6}$/, 'Please provide a valid 6-digit pincode'],
+        default: null,
+      },
+      country: { type: String, trim: true, default: 'India' },
+    },
+    emergencyContact: {
+      name: { type: String, trim: true, default: null },
+      relation: { type: String, trim: true, default: null },
+      phone: {
+        type: String,
+        trim: true,
+        match: [/^[6-9]\d{9}$/, 'Please provide a valid 10-digit mobile number'],
+        default: null,
+      },
+    },
+    profilePicture: {
+      type: String,
+      default: null,
+    },
+
     // ─── Email Verification ──────────────────────────
     isVerified: {
       type: Boolean,
@@ -103,11 +144,33 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
   },
-  { timestamps: true }
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
 
-// ─── Indexes ───────────────────────────────────────────
-userSchema.index({ email: 1 });
+// ─── Virtuals ──────────────────────────────────────────
+
+/**
+ * Computed age from DOB. Returns null if DOB is not set.
+ */
+userSchema.virtual('age').get(function () {
+  if (!this.dob) return null;
+  const today = new Date();
+  const birth = new Date(this.dob);
+  let years = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    years--;
+  }
+  return years;
+});
+
+/**
+ * Formatted patient ID: HS-XXXXXXXX (first 8 hex chars of _id).
+ */
+userSchema.virtual('patientId').get(function () {
+  if (!this._id) return null;
+  return `HS-${this._id.toString().slice(0, 8).toUpperCase()}`;
+});
 
 // ─── Pre-save Hook: Hash Password ──────────────────────
 // Mongoose 9 no longer passes a `next` callback to pre-hooks; use an async function instead.
@@ -166,7 +229,7 @@ userSchema.methods.resetLoginAttempts = async function () {
  * Remove sensitive fields when converting to JSON.
  */
 userSchema.methods.toJSON = function () {
-  const obj = this.toObject();
+  const obj = this.toObject({ virtuals: true });
   delete obj.password;
   delete obj.loginAttempts;
   delete obj.lockUntil;
@@ -175,3 +238,4 @@ userSchema.methods.toJSON = function () {
 };
 
 module.exports = mongoose.model('User', userSchema);
+
