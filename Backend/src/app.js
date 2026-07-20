@@ -29,6 +29,7 @@ const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const compression = require('compression');
+const path = require('path');
 
 const requestId = require('./middleware/requestId');
 const applySecurity = require('./middleware/security');
@@ -71,6 +72,10 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));  //what is url e
 
 // ─── 6. Cookie Parser ──────────────────────────────────────
 app.use(cookieParser());
+
+// ─── 6.5. Static Files (uploaded profile pictures, etc.) ───
+const uploadDir = process.env.UPLOAD_DIR || 'uploads';
+app.use('/uploads', express.static(path.join(process.cwd(), uploadDir)));
 
 // ─── 7. General Rate Limiter ────────────────────────────────  ??
 app.use(generalLimiter);
