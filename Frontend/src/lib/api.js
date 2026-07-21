@@ -1,5 +1,9 @@
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
+// Origin of the backend (no /api suffix) — used to resolve statically served
+// files such as profile pictures (Backend/src/app.js serves /uploads).
+export const API_ORIGIN = BASE_URL.replace(/\/api\/?$/, "");
+
 /**
  * Thin fetch wrapper for the HealthSync API.
  * - Attaches the access token (if present) as a Bearer token.
@@ -12,8 +16,11 @@ const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
  * on success, or { success: false, message, errors: [{field, message}] }
  * on failure (see Backend/src/utils/ApiResponse.js and ApiError.js).
  */
-async function request(path, { method = "GET", body, token } = {}) {
-  const headers = { "Content-Type": "application/json" };
+async function request(path, { method = "GET", body, formData, token } = {}) {
+  // For multipart uploads (formData) the browser must set the Content-Type
+  // (with boundary) itself, so we only set it for JSON bodies.
+  const headers = {};
+  if (!formData) headers["Content-Type"] = "application/json";
   if (token) headers.Authorization = `Bearer ${token}`;
 
   let res;
@@ -22,7 +29,7 @@ async function request(path, { method = "GET", body, token } = {}) {
       method,
       headers,
       credentials: "include",
-      body: body ? JSON.stringify(body) : undefined,
+      body: formData || (body ? JSON.stringify(body) : undefined),
     });
   } catch {
     throw new Error("Could not reach the server. Please check your connection and try again.");
@@ -56,4 +63,22 @@ export const authApi = {
   refresh: () => request("/auth/refresh", { method: "POST" }),
   logout: (token) => request("/auth/logout", { method: "POST", token }),
   me: (token) => request("/auth/me", { token }),
+};
+
+/**
+ * Patient endpoints (Backend/src/routes/patient.routes.js).
+ * All require a patient ('user' role) access token.
+ */
+export const patientApi = {
+  getProfile: (token) => request("/patients/profile", { token }),
+  updateProfile: (payload, token) =>
+    request("/patients/profile", { method: "PATCH", body: payload, token }),
+  getDashboard: (token) => request("/patients/dashboard", { token }),
+  uploadProfilePicture: (file, token) => {
+    const formData = new FormData();
+    formData.append("profilePicture", file);
+    return request("/patients/profile/picture", { method: "POST", formData, token });
+  },
+  deleteProfilePicture: (token) =>
+    request("/patients/profile/picture", { method: "DELETE", token }),
 };

@@ -1,7 +1,8 @@
 /**
  * Auth controller.
  * Handles HTTP concerns: request parsing, cookies, response status codes.
- */
+*/
+
 const authService = require('../services/auth.service');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiResponse = require('../utils/ApiResponse');
@@ -66,7 +67,7 @@ const login = asyncHandler(async (req, res) => {
 
   const result = await authService.login(email, password, role, ip, userAgent);
 
-  // Set refresh token in HttpOnly cookie
+  // Set refresh token in HttpOnly cookie => res.cookie(name, value, options);
   res.cookie(REFRESH_TOKEN_COOKIE_NAME, result.refreshToken, getCookieOptions());
 
   const response = ApiResponse.ok(

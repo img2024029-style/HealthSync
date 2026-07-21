@@ -129,9 +129,10 @@ refreshTokenSchema.statics.revokeFamily = async function (family) {
   return this.updateMany({ family }, { isRevoked: true });
 };
 
-/**
- * Delete a specific token.
- */
+/*
+  Delete a specific token.
+*/
+
 refreshTokenSchema.statics.deleteToken = async function (tokenDocId) {
   return this.findByIdAndDelete(tokenDocId);
 };

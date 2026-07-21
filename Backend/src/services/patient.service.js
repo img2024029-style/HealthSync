@@ -35,6 +35,12 @@ const ALLOWED_UPDATE_FIELDS = [
 const buildUpdateObject = (body) => {
   const update = {};
 
+  // Flat aliases: the public API (and patient.validator.js) accept
+  // `firstName` / `lastName` at the top level; map them onto the nested
+  // fullName paths so they aren't silently dropped.
+  if (body.firstName !== undefined) update['fullName.firstName'] = body.firstName;
+  if (body.lastName !== undefined) update['fullName.lastName'] = body.lastName;
+
   for (const field of ALLOWED_UPDATE_FIELDS) {
     // Support both dot-notation keys in body and nested object access
     const parts = field.split('.');
